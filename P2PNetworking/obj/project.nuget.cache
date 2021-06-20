@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "dgSpecHash": "b83n9sUav7G6o/n/oIEt3KrVLqY69x0TvbHsJ/BOwWEqnmwcKVAyVgkxeNmr10xcElUcEa2K1zNingkRI5iDKA==",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Zachary Londono\\Documents\\GitHub\\Learning C#\\P2PNetworking\\P2PNetworking.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Zachary Londono\\.nuget\\packages\\microsoft.data.sqlite\\5.0.7\\microsoft.data.sqlite.5.0.7.nupkg.sha512",
+    "C:\\Users\\Zachary Londono\\.nuget\\packages\\microsoft.data.sqlite.core\\5.0.7\\microsoft.data.sqlite.core.5.0.7.nupkg.sha512",
+    "C:\\Users\\Zachary Londono\\.nuget\\packages\\sqlitepclraw.bundle_e_sqlite3\\2.0.4\\sqlitepclraw.bundle_e_sqlite3.2.0.4.nupkg.sha512",
+    "C:\\Users\\Zachary Londono\\.nuget\\packages\\sqlitepclraw.core\\2.0.4\\sqlitepclraw.core.2.0.4.nupkg.sha512",
+    "C:\\Users\\Zachary Londono\\.nuget\\packages\\sqlitepclraw.lib.e_sqlite3\\2.0.4\\sqlitepclraw.lib.e_sqlite3.2.0.4.nupkg.sha512",
+    "C:\\Users\\Zachary Londono\\.nuget\\packages\\sqlitepclraw.provider.dynamic_cdecl\\2.0.4\\sqlitepclraw.provider.dynamic_cdecl.2.0.4.nupkg.sha512",
+    "C:\\Users\\Zachary Londono\\.nuget\\packages\\system.memory\\4.5.3\\system.memory.4.5.3.nupkg.sha512"
+  ],
+  "logs": []
+}
