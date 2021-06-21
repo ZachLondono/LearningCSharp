@@ -6,10 +6,10 @@ using System.Threading;
 using System.Collections.Generic;
 
 namespace P2PNetworking {
-    class Peer {
+    class Node {
 
         static void Main(string[] args) {               
-            Peer peer = new Peer();
+            Node peer = new Node();
             peer.ConnectToPeers();
 
             Thread listenerThread = new Thread(new ThreadStart(peer.ListenForConnections));
@@ -23,11 +23,11 @@ namespace P2PNetworking {
         private readonly int Port;
         private readonly int Backlog;
 
-        public Peer() : this(11000, 10) {            
+        public Node() : this(11000, 10) {            
             // Start on default port
         }
 
-        public Peer(int port, int backlog) {
+        public Node(int port, int backlog) {
  
             Port = port;
             Backlog = backlog;
