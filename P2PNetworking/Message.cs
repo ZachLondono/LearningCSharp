@@ -47,15 +47,46 @@ namespace P2PNetworking {
 			}
 		}
 
+		public static ArrayContent<T> GetContent(byte[] encoded) {
+			
+			byte count = encoded[0];
+			int objSize = Marshal.SizeOf(typeof(T));
+
+			T[] objArray = new T[count]; 
+
+			for (int i = 0; i < count; i++) {
+				
+				int offset = (i * objSize) + 1;
+
+				T obj;
+
+				IntPtr ptr = Marshal.AllocHGlobal(objSize);
+				Marshal.Copy(encoded, offset, ptr, objSize);
+				obj = (T) Marshal.PtrToStructure(ptr, typeof(T));
+				Marshal.FreeHGlobal(ptr);
+
+				objArray[i] = obj;
+
+			}
+
+			ArrayContent<T> objs = new ArrayContent<T>();
+
+			return objs;
+
+		}
+
 		public byte[] GetBytes() {
 			
 			int objSize = Marshal.SizeOf(typeof(T));
 			
-			byte[] encoded = new byte[objSize * Count];
+			// Enough bytes for the objects, plus 1 for the object count
+			byte[] encoded = new byte[objSize * Count + 1];
+
+			encoded[0] = Count;
 
 			for (int i = 0; i < Count; i++) {
 				
-				int offset = objSize * i;
+				int offset = (objSize * i)+ 1;
 
 				T obj = Contents[i];				
 
