@@ -18,8 +18,11 @@ namespace P2PNetworking {
 
         }
 
+        public static readonly int Version = 1;
+        public static readonly int MinimumSupportedVersion = 1;
+
         private SqliteConnection DBConnection { get; set; }
-        private List<Socket> Connections { get; set;}
+        private List<ClientHandler> Connections { get; set;}
         private readonly int Port;
         private readonly int Backlog;
 
@@ -35,7 +38,7 @@ namespace P2PNetworking {
             Console.WriteLine("Starting Peer...");
 
             // List to store connections
-            Connections = new List<Socket>();
+            Connections = new List<ClientHandler>();
             
             Console.WriteLine("Opening Connection To Database...");
             // Open new connection to database
@@ -133,9 +136,14 @@ namespace P2PNetworking {
 
         public void AddPeer(Socket socket) {
 
-            // If no exception is thrown, add connection to list of connections
-            Connections.Add(socket);
- 
+            // Start thread to handle communications with this socket
+            //...
+            ClientHandler handler = new ClientHandler(socket);
+            Thread handlerThread = new Thread(new ThreadStart(handler.Run));
+            handlerThread.Start();
+
+            Connections.Add(handler);
+
         }
 
         public void AddPeer(string host, int port) {
