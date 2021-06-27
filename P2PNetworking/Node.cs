@@ -9,7 +9,22 @@ namespace P2PNetworking {
     class Node {
 
         static void Main(string[] args) {               
-            Node peer = new Node();
+
+
+            Node peer;
+            if (args.Length == 1) {
+
+                Console.WriteLine(args[0]);
+                int port = Convert.ToInt32(args[0]);
+
+                peer = new Node(port, 10);
+
+            } else {
+ 
+                peer = new Node();
+ 
+            }
+
             peer.ConnectToPeers();
 
             Thread listenerThread = new Thread(new ThreadStart(peer.ListenForConnections));
@@ -70,6 +85,8 @@ namespace P2PNetworking {
 
             try {
 
+                Console.WriteLine($"Listening for connections on: {Dns.GetHostName()}:{Port}");
+
                 listener.Bind(localEndPoint);
                 listener.Listen(Backlog);
 
@@ -112,8 +129,10 @@ namespace P2PNetworking {
                     try {
                         
                         // Connect to new peer
-                        AddPeer(host, port);
+                        ClientHandler handler = AddPeer(host, port);
                         Console.WriteLine("Successful Connection to Peer: {0}:{1}", host, port);
+
+                        handler.SendMessage(MessageType.ConnectionCheck, null);
 
                     } catch (Exception e) {
                         // Error connecting to new peer, remove it from peers list
@@ -134,7 +153,7 @@ namespace P2PNetworking {
         }
 
 
-        public void AddPeer(Socket socket) {
+        public ClientHandler AddPeer(Socket socket) {
 
             // Start thread to handle communications with this socket
             //...
@@ -144,9 +163,11 @@ namespace P2PNetworking {
 
             Connections.Add(handler);
 
+            return handler;
+
         }
 
-        public void AddPeer(string host, int port) {
+        public ClientHandler AddPeer(string host, int port) {
             
             // Get information about the host
             IPHostEntry ipHostInfo = Dns.GetHostEntry(host); 
@@ -160,7 +181,7 @@ namespace P2PNetworking {
             peerSocket.Connect(remoteEP);
 
             // If no exception is thrown, add connection to list of connections
-            AddPeer(peerSocket);
+            return AddPeer(peerSocket);
         
         }
 

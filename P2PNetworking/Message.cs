@@ -6,12 +6,14 @@ using System.Runtime.InteropServices;
 namespace P2PNetworking {
 
 	public enum MessageType : byte {
-		PeerRequest = 1, 	// Request for all known peers that can be connected to
-		RecordResponse = 2,	// Response containing a record
-		InvalidRequest = 3,	// Response to an invalid request
-		UnsuportedProtocolVersion = 4,	// Response to a request with an unsuported version
-		MessageTimeout = 5,	// Response when the last sent message has timed out before the entire message was recieved
-		ConnectionTimeout = 6	// Response when a connection has been timed out, and then disconnected
+		ConnectionCheck = 0,
+		SuccessfulConnection = 1,
+		PeerRequest = 2, 	// Request for all known peers that can be connected to
+		RecordResponse = 3,	// Response containing a record
+		InvalidRequest = 4,	// Response to an invalid request
+		UnsuportedProtocolVersion = 5,	// Response to a request with an unsuported version
+		MessageTimeout = 6,	// Response when the last sent message has timed out before the entire message was recieved
+		ConnectionTimeout = 7,	// Response when a connection has been timed out, and then disconnected
 	}
 
 	public struct MessageHeader {

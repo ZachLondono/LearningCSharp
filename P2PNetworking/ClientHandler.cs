@@ -45,7 +45,14 @@ namespace P2PNetworking {
 				// If connection died while recieving data, exit function
 				if (!IsAlive) return;
 
+				Console.WriteLine("--- Message Header ---");
+				foreach (byte b in state.Buffer) {
+					Console.Write(Convert.ToString(b, 2).PadLeft(8,'0'));
+				}
+				Console.WriteLine("\n----------------------");
+
 	            MessageHeader header = MessageHeader.FromBytes(state.Buffer);
+				HasRecievedMessage = true;
 
 	            if (header.ProtocolVersion < Node.MinimumSupportedVersion) {
 	                // Unsupported version
@@ -69,7 +76,13 @@ namespace P2PNetworking {
 				if (content != null) Console.WriteLine($"Message Recieved: v{header.ProtocolVersion}\nType: {header.ContentType}\nSize: {header.ContentLength}\nContent: {BitConverter.ToString(content).Replace("-","")}");
 				else Console.WriteLine($"Message Recieved: v{header.ProtocolVersion}\nType: {header.ContentType}\nSize: {header.ContentLength}\nContent: {{None}}");
 
-				// TODO pass the content to the appropiate handler function
+				if (header.ContentType == MessageType.ConnectionCheck) {						
+					
+					SendMessage(MessageType.SuccessfulConnection, null);
+
+				} else {
+					// TODO pass the content to the appropiate handler function
+				}
 				
 	        }
 
@@ -79,8 +92,9 @@ namespace P2PNetworking {
 	
 			ReadState state = new ReadState(size);
 			// Start to recieve data from client
-			Socket.BeginReceive(state.Buffer, 0, size, 
-					SocketFlags.None, new AsyncCallback(DataRecieved), state);
+			//Socket.BeginReceive(state.Buffer, 0, size, 
+			//		SocketFlags.None, new AsyncCallback(DataRecieved), state);
+			BeginReceive(state);
    
             while (!state.IsDone) {
 				if (!IsAlive) return state;
@@ -99,36 +113,58 @@ namespace P2PNetworking {
 			return state;
 
 		}
-
-		private void DataRecieved(IAsyncResult ar) {
-			
-			// Get state
-			ReadState state = (ReadState) ar.AsyncState;
-			int recieved = Socket.EndReceive(ar);
-
-			state.TotalRecieved = state.TotalRecieved += recieved;
-
-			// Check how much data has been read, if it is less then the exptected amount of data, continue to read more data
-			if (state.TotalRecieved < state.ExpectedSize) {					
-				Socket.BeginReceive(state.Buffer, state.TotalRecieved, 
-					state.ExpectedSize - state.TotalRecieved,
-					SocketFlags.None, new AsyncCallback(DataRecieved), state);
-			}
-		}
-
-		private void SendMessage(MessageType type, byte[] content) {
+		public void SendMessage(MessageType type, byte[] content) {
 
 			MessageHeader header = new MessageHeader();
 			header.ProtocolVersion = Convert.ToByte(Node.Version);
 			header.ContentType = type;
 			header.ContentLength = content == null ? 0 : content.Length;
 
+			// TODO make sending async
 			Socket.Send(MessageHeader.GetBytes(header));
 			if (header.ContentLength != 0) Socket.Send(content);
 
 		}
 
+		/// Start recieving data with a given ReadState
+		private void BeginReceive(ReadState state) {
+
+			try {
+				Socket.BeginReceive(state.Buffer, state.TotalRecieved, 
+					state.ExpectedSize - state.TotalRecieved,
+					SocketFlags.None, new AsyncCallback(DataRecieved), state);
+			} catch (SocketException e) {					
+				Console.WriteLine("Exception occurred while reading from peer:\n{0}", e.ToString());
+				IsAlive = false;
+			}
+
+		}
+	
+		/// Callback function called when data is recieved from async Recieve
+		private void DataRecieved(IAsyncResult ar) {
+			
+			// Get state
+			ReadState state = (ReadState) ar.AsyncState;
+			int recieved = 0;
+			try {
+				recieved = Socket.EndReceive(ar);
+			} catch (SocketException e) {					
+				Console.WriteLine("Exception occurred while reading from peer:\n{0}", e.ToString());
+				IsAlive = false;
+				return;
+			} 
+
+			state.TotalRecieved = state.TotalRecieved += recieved;
+
+			// Check how much data has been read, if it is less then the exptected amount of data, continue to read more data
+			if (state.TotalRecieved < state.ExpectedSize) {					
+				BeginReceive(state);
+			}
+
+		}
+
         private void OnTimerEvent(Object source, System.Timers.ElapsedEventArgs e) {
+			if (HasRecievedMessage) return;
 			// Too much time has elapsed, send timeout to client
 			SendMessage(MessageType.ConnectionTimeout, null);
 			// After sending timeout response to client, wait up to 10 seconds before terminating the connection to allow the client to recieve the message
