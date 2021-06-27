@@ -71,7 +71,32 @@ namespace P2PNetworking {
             ";
             Console.WriteLine("Creating peers Table if it does not yet exist");
             command.ExecuteNonQuery();
+            
+            System.Timers.Timer timer = new System.Timers.Timer();
+	        timer.Interval = 1000 * 60; // Check all peer connections are still active 
+	        timer.Elapsed += CheckConnections;
+	        timer.AutoReset = true;
+	        timer.Enabled = true;
+            timer.Start();
         
+        }
+
+        private void CheckConnections(Object source, System.Timers.ElapsedEventArgs e) {
+
+            for (int i = 0; i < Connections.Count; i++) {
+
+                ClientHandler client = Connections[i];
+
+                // TODO should check that there isn't any data left to be sent
+                if (!client.IsAlive) client.Socket.Close();
+
+                if (!client.Socket.Connected) {
+                    Console.WriteLine("Removing stale connection");
+                    Connections.RemoveAt(i);
+                }
+
+            }
+
         }
 
         /// Begins listening for incoming connections
