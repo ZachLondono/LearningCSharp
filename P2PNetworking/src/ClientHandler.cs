@@ -159,8 +159,14 @@ namespace P2PNetworking {
 			header.ProtocolVersion = Convert.ToByte(Node.Version);
 			header.ContentType = type;
 			header.ContentLength = content == null ? 0 : content.Length;
-			header.forward = forward;
+			header.Forward = forward;
 
+			SendMessage(header, content);
+
+		}
+
+		public void SendMessage(MessageHeader header, byte[] content) {
+	
 			// TODO make sending async
 			Socket.Send(MessageHeader.GetBytes(header));
 			if (header.ContentLength != 0) Socket.Send(content);
