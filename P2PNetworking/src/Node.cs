@@ -38,6 +38,9 @@ namespace P2PNetworking {
         public static readonly int Version = 1;
         public static readonly int MinimumSupportedVersion = 1;
 
+        public delegate void OnMessageTypeRecieved(ClientHandler source, MessageReceivedArgs args);
+
+        private Dictionary<MessageType, OnMessageTypeRecieved> MessageMap;
         private SqliteConnection DBConnection { get; set; }
         private List<ClientHandler> Connections { get; set;}
         private readonly int Port;
@@ -73,7 +76,18 @@ namespace P2PNetworking {
             ";
             Console.WriteLine("Creating peers Table if it does not yet exist");
             command.ExecuteNonQuery();
-        
+
+            MessageMap = new Dictionary<MessageType, OnMessageTypeRecieved>();
+            
+            MessageMap.Add(MessageType.ConnectionCheck, delegate(ClientHandler source, MessageReceivedArgs args) {
+                Console.WriteLine("Connection check message recieved");
+                source.SendMessage(MessageType.SuccessfulConnection, null, false);
+            });
+            
+            MessageMap.Add(MessageType.SuccessfulConnection, delegate(ClientHandler source, MessageReceivedArgs args) {
+                Console.WriteLine("Successful Connection");
+            });
+
         }
 
         /// Begins listening for incoming connections
@@ -157,18 +171,24 @@ namespace P2PNetworking {
         public void OnMessageReceived(object source, MessageReceivedArgs message) {
 
             ClientHandler sourceHandler = (ClientHandler) source;
-	
-            MessageHeader header = message.Header;
-            byte[] content = message.Content;
 
-            Console.WriteLine("------- Message-------");
-            if (content != null) Console.WriteLine($"Message Recieved: v{header.ProtocolVersion}\nType: {header.ContentType}\nSize: {header.ContentLength}\nContent: {BitConverter.ToString(content).Replace("-","")}");
-            else Console.WriteLine($"Message Recieved: v{header.ProtocolVersion}\nType: {header.ContentType}\nSize: {header.ContentLength}\nContent: {{None}}");
-            Console.WriteLine("\n----------------------");
+            Console.WriteLine("Message Recieved");
 
-            if (header.ContentType == MessageType.ConnectionCheck) {						
-                sourceHandler.SendMessage(MessageType.SuccessfulConnection, null, false);
-			}
+            OnMessageTypeRecieved value;
+ 
+            if (MessageMap.TryGetValue(message.Header.ContentType, out value)) {
+                value(sourceHandler, message);
+            }
+
+            if (message.Header.Forward) {
+                // TODO: check if this node has already seen this message, if it has, do not forward it
+                foreach (ClientHandler connection in Connections) {
+                    if(!sourceHandler.Equals(connection)) {
+                        sourceHandler.SendMessage(message.Header, message.Content);
+                    }
+                }
+            
+            }
 
         }
 
