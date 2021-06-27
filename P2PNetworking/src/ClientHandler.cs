@@ -3,12 +3,32 @@ using System.Threading;
 using System.Net.Sockets;
 
 namespace P2PNetworking {
+	
+	public class MessageReceivedArgs {
+ 
+		public MessageHeader Header { get; }
+		public byte[] Content { get; }
+
+		public MessageReceivedArgs (MessageHeader header, byte[] content) {
+
+			Header = header;
+			Content = content;
+
+		}
+
+	}
 
 	class ClientHandler {
 	    
 		public Socket Socket { get; }
 	    public DateTime StartTime { get; }
 		public bool IsAlive { get => _isAlive; }
+
+		public delegate void MessageReceiveHandler(object source, MessageReceivedArgs args);
+		public event MessageReceiveHandler MessageReceived;
+
+		public delegate void PeerDisconectHandler(object source, EventArgs args);
+		public event PeerDisconectHandler PeerDisconected;
 	
 		private bool _isAlive;
 	    private bool HasRecievedMessage;
@@ -24,7 +44,7 @@ namespace P2PNetworking {
 
 	        System.Timers.Timer timer = new System.Timers.Timer();
 	        timer.Interval = 1000 * 60; // 1 Minute timeout
-	        timer.Elapsed += OnTimerEvent;
+	        timer.Elapsed += OnConnectionTimeout;
 	        timer.AutoReset = false;
 	        timer.Enabled = true;
 			timer.Start();
@@ -51,7 +71,7 @@ namespace P2PNetworking {
 						bool readCheck = Socket.Poll(100, SelectMode.SelectRead);
 						if (readCheck) {
 							_isAlive = false;
-							Console.WriteLine("Socket Closed {0}", Socket.Connected);
+							OnPeerDisconect();
 							return;
 						}
 					}
@@ -66,18 +86,12 @@ namespace P2PNetworking {
 				// If connection died while recieving data, exit function
 				if (!IsAlive) return;
 
-				Console.WriteLine("--- Message Header ---");
-				foreach (byte b in state.Buffer) {
-					Console.Write(Convert.ToString(b, 2).PadLeft(8,'0'));
-				}
-				Console.WriteLine("\n----------------------");
-
 	            MessageHeader header = MessageHeader.FromBytes(state.Buffer);
 				HasRecievedMessage = true;
 
 	            if (header.ProtocolVersion < Node.MinimumSupportedVersion) {
 	                // Unsupported version
-					SendMessage(MessageType.UnsuportedProtocolVersion, null);
+					SendMessage(MessageType.UnsuportedProtocolVersion, null, false);
 					continue;
 	            }
 
@@ -93,28 +107,32 @@ namespace P2PNetworking {
 					content = contentState.Buffer;	
 
 				}
-
-				if (content != null) Console.WriteLine($"Message Recieved: v{header.ProtocolVersion}\nType: {header.ContentType}\nSize: {header.ContentLength}\nContent: {BitConverter.ToString(content).Replace("-","")}");
-				else Console.WriteLine($"Message Recieved: v{header.ProtocolVersion}\nType: {header.ContentType}\nSize: {header.ContentLength}\nContent: {{None}}");
-
-				if (header.ContentType == MessageType.ConnectionCheck) {						
-					
-					SendMessage(MessageType.SuccessfulConnection, null);
-
-				} else {
-					// TODO pass the content to the appropiate handler function
-				}
+				
+				// Send event to Node that a message was recieved
+				OnMessageReceived(header, content);
 				
 	        }
 
 	    }
 
+		protected virtual void OnMessageReceived(MessageHeader header, byte[] content) {
+
+			if (MessageReceived != null)
+				MessageReceived(this, new MessageReceivedArgs(header, content));
+
+		}
+
+		protected virtual void OnPeerDisconect() {
+
+			if (PeerDisconected != null)
+				PeerDisconected(this, EventArgs.Empty);
+
+		}
+
 		private ReadState RecieveData(int size) {
 	
 			ReadState state = new ReadState(size);
 			// Start to recieve data from client
-			//Socket.BeginReceive(state.Buffer, 0, size, 
-			//		SocketFlags.None, new AsyncCallback(DataRecieved), state);
 			BeginReceive(state);
    
             while (!state.IsDone) {
@@ -122,7 +140,7 @@ namespace P2PNetworking {
 				// As data is read, check that message has not timed out
                 if (state.ElapsedTime > (1000 * 30)) {
                     // too mutch Time has passed, send timeout to message 
-					SendMessage(MessageType.MessageTimeout, null);
+					SendMessage(MessageType.MessageTimeout, null, false);
 					
 					// Reset state and begin waiting for next message
 					state.ResetState();
@@ -134,20 +152,18 @@ namespace P2PNetworking {
 			return state;
 
 		}
-		public void SendMessage(MessageType type, byte[] content) {
 
-			Console.WriteLine("Sending Message");
+		public void SendMessage(MessageType type, byte[] content, bool forward) {
 
 			MessageHeader header = new MessageHeader();
 			header.ProtocolVersion = Convert.ToByte(Node.Version);
 			header.ContentType = type;
 			header.ContentLength = content == null ? 0 : content.Length;
+			header.forward = forward;
 
 			// TODO make sending async
 			Socket.Send(MessageHeader.GetBytes(header));
 			if (header.ContentLength != 0) Socket.Send(content);
-
-			Console.WriteLine("Message Sent");
 
 		}
 
@@ -161,6 +177,7 @@ namespace P2PNetworking {
 			} catch (SocketException e) {					
 				Console.WriteLine("Exception occurred while reading from peer:\n{0}", e.ToString());
 				_isAlive = false;
+				OnPeerDisconect();
 			}
 
 		}
@@ -176,6 +193,7 @@ namespace P2PNetworking {
 			} catch (SocketException e) {					
 				Console.WriteLine("Exception occurred while reading from peer:\n{0}", e.ToString());
 				_isAlive = false;
+				OnPeerDisconect();
 				return;
 			} 
 
@@ -188,16 +206,17 @@ namespace P2PNetworking {
 
 		}
 
-        private void OnTimerEvent(Object source, System.Timers.ElapsedEventArgs e) {
+        private void OnConnectionTimeout(Object source, System.Timers.ElapsedEventArgs e) {
 			if (HasRecievedMessage) return;
 			// Too much time has elapsed, send timeout to client
-			SendMessage(MessageType.ConnectionTimeout, null);
+			SendMessage(MessageType.ConnectionTimeout, null, false);
 			// After sending timeout response to client, wait up to 10 seconds before terminating the connection to allow the client to recieve the message
 			_isAlive = false;
 			Socket.Close(10);
-			// TODO signal main thread to get rid of this connection and thread
+			OnPeerDisconect();
         }
 
+		
 
 		class ReadState {
 			private DateTime startTime;

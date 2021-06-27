@@ -20,6 +20,7 @@ namespace P2PNetworking {
 		public byte ProtocolVersion;
 		public MessageType ContentType;
 		public int ContentLength;
+		public bool forward; 
 
 		public static int Size {
 			get => Marshal.SizeOf(typeof(MessageHeader));
@@ -54,10 +55,6 @@ namespace P2PNetworking {
 			return obj;
 
 		}
-
-	//	public static int Size() {
-	//		return Marshal.SizeOf(typeof(MessageHeader));
-	//	}
 
 	}
 

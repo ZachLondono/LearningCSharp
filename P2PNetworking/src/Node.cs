@@ -5,11 +5,13 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Collections.Generic;
 
+using System.Runtime.InteropServices;
+
 namespace P2PNetworking {
+ 
     class Node {
 
         static void Main(string[] args) {               
-
 
             Node peer;
             if (args.Length == 1) {
@@ -71,32 +73,7 @@ namespace P2PNetworking {
             ";
             Console.WriteLine("Creating peers Table if it does not yet exist");
             command.ExecuteNonQuery();
-            
-            System.Timers.Timer timer = new System.Timers.Timer();
-	        timer.Interval = 1000 * 60; // Check all peer connections are still active 
-	        timer.Elapsed += CheckConnections;
-	        timer.AutoReset = true;
-	        timer.Enabled = true;
-            timer.Start();
         
-        }
-
-        private void CheckConnections(Object source, System.Timers.ElapsedEventArgs e) {
-
-            for (int i = 0; i < Connections.Count; i++) {
-
-                ClientHandler client = Connections[i];
-
-                // TODO should check that there isn't any data left to be sent
-                if (!client.IsAlive) client.Socket.Close();
-
-                if (!client.Socket.Connected) {
-                    Console.WriteLine("Removing stale connection");
-                    Connections.RemoveAt(i);
-                }
-
-            }
-
         }
 
         /// Begins listening for incoming connections
@@ -157,7 +134,7 @@ namespace P2PNetworking {
                         ClientHandler handler = AddPeer(host, port);
                         Console.WriteLine("Successful Connection to Peer: {0}:{1}", host, port);
 
-                        handler.SendMessage(MessageType.ConnectionCheck, null);
+                        handler.SendMessage(MessageType.ConnectionCheck, null, false);
 
                     } catch (Exception e) {
                         // Error connecting to new peer, remove it from peers list
@@ -177,12 +154,37 @@ namespace P2PNetworking {
             }
         }
 
+        public void OnMessageReceived(object source, MessageReceivedArgs message) {
+
+            ClientHandler sourceHandler = (ClientHandler) source;
+	
+            MessageHeader header = message.Header;
+            byte[] content = message.Content;
+
+            Console.WriteLine("------- Message-------");
+            if (content != null) Console.WriteLine($"Message Recieved: v{header.ProtocolVersion}\nType: {header.ContentType}\nSize: {header.ContentLength}\nContent: {BitConverter.ToString(content).Replace("-","")}");
+            else Console.WriteLine($"Message Recieved: v{header.ProtocolVersion}\nType: {header.ContentType}\nSize: {header.ContentLength}\nContent: {{None}}");
+            Console.WriteLine("\n----------------------");
+
+            if (header.ContentType == MessageType.ConnectionCheck) {						
+                sourceHandler.SendMessage(MessageType.SuccessfulConnection, null, false);
+			}
+
+        }
+
 
         public ClientHandler AddPeer(Socket socket) {
 
             // Start thread to handle communications with this socket
-            //...
             ClientHandler handler = new ClientHandler(socket);
+            // Handler called on message receive
+            handler.MessageReceived += OnMessageReceived;
+            // Handler called on peer disconnect
+            handler.PeerDisconected += delegate (object o, EventArgs e) {
+                Console.WriteLine("Removing Stale Connection");
+                Connections.Remove((ClientHandler) o);
+            };
+
             Thread handlerThread = new Thread(new ThreadStart(handler.Run));
             handlerThread.Start();
 
