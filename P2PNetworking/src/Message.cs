@@ -6,19 +6,32 @@ using System.Runtime.InteropServices;
 namespace P2PNetworking {
 
 	public enum MessageType : byte {
-		ConnectionCheck = 0,
-		SuccessfulConnection = 1,
-		PeerRequest = 2, 	// Request for all known peers that can be connected to
-		RecordResponse = 3,	// Response containing a record
-		InvalidRequest = 4,	// Response to an invalid request
-		UnsuportedProtocolVersion = 5,	// Response to a request with an unsuported version
-		MessageTimeout = 6,	// Response when the last sent message has timed out before the entire message was recieved
-		ConnectionTimeout = 7,	// Response when a connection has been timed out, and then disconnected
+
+		// Request Codes 
+		CONNECT = 1,
+		REQUEST_PEERS = 2,
+		REQUEST_RESOURCE = 3,
+		CREATE_RESOURCE = 4,
+		UPDATE_RESOURCE = 5,
+		DELETE_RESOURCE = 6,
+		
+		// Response Codes
+		REQUEST_SUCCESSFUL = 128,
+		INVALID_REQUEST = 129,
+		RESOURCE_NOT_FOUND = 130,
+		RESOURCE_CREATED = 134,
+		RESOURCE_ALREADY_EXISTS = 132,
+		RESOURCE_UPDATED = 133,
+		RESOURCE_DELETED = 134,
+		VERSION_UNSUPPORTED = 135,
+		NOT_IMPLEMENTED = 136,
 	}
 
 	public struct MessageHeader {
+		
 		public byte ProtocolVersion;
 		public MessageType ContentType;
+		public short ReferenceId;
 		public int ContentLength;
 		public bool Forward; 
 
@@ -56,12 +69,6 @@ namespace P2PNetworking {
 
 		}
 
-	}
-
-	public struct Peer {
-		[MarshalAs(UnmanagedType.ByValTStr, SizeConst = 255)]
-		public string host;
-		public ushort port;
 	}
 
 	public class ArrayContent<T> {
