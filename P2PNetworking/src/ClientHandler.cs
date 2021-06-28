@@ -21,7 +21,7 @@ namespace P2PNetworking {
 	class ClientHandler {
 	    
 		public Socket Socket { get; }
-	    public DateTime StartTime { get; }
+		public DateTime StartTime { get; }
 		public bool IsAlive { get => _isAlive; }
 
 		public delegate void MessageReceiveHandler(object source, MessageReceivedArgs args);
@@ -30,44 +30,48 @@ namespace P2PNetworking {
 		public delegate void PeerDisconectHandler(object source, EventArgs args);
 		public event PeerDisconectHandler PeerDisconected;
 	
+		private delegate void ResponseHandler(object source, MessageReceivedArgs args);
+		private event ResponseHandler ResponseReceived;
+
 		private bool _isAlive;
-	    private bool HasRecievedMessage;
+		private bool HasRecievedMessage;
 
-	    public ClientHandler(Socket socket) {
-	        Socket = socket;
-	        StartTime = DateTime.Now;
-	        HasRecievedMessage = false;
+		public ClientHandler(Socket socket) {
+	        	Socket = socket;
+			StartTime = DateTime.Now;
+			HasRecievedMessage = false;
 			_isAlive = true;
-	    }
+		}
 		
-	    public void Run() {
 
-	        System.Timers.Timer timer = new System.Timers.Timer();
-	        timer.Interval = 1000 * 60; // 1 Minute timeout
-	        timer.Elapsed += OnConnectionTimeout;
-	        timer.AutoReset = false;
-	        timer.Enabled = true;
+		public void Run() {
+		
+			System.Timers.Timer timer = new System.Timers.Timer();
+			timer.Interval = 1000 * 60; // 1 Minute timeout
+			timer.Elapsed += OnConnectionTimeout;
+			timer.AutoReset = false;
+			timer.Enabled = true;
 			timer.Start();
 
-	        // If no message is recieved in a reasonable time, disconect from client
-	
-	        // A client will first try to read in the necessary bytes for a MessageHeader
-	        // If a reasonable amount of time has elapsed, and an insufficient amount of bytes has
-	        // been read, then the client will stop trying to read more bytes and discard the currently 
-	        // read bytes.
-
-	        // If a message is recieved, this client will process the message and respond with either
-	        // a success or failure message 
-
-	        while (true) {
-
-				
+			// If no message is recieved in a reasonable time, disconect from client
+			
+			// A client will first try to read in the necessary bytes for a MessageHeader
+			// If a reasonable amount of time has elapsed, and an insufficient amount of bytes has
+			// been read, then the client will stop trying to read more bytes and discard the currently 
+			// read bytes.
+			
+			// If a message is recieved, this client will process the message and respond with either
+			// a success or failure message 
+			
+			while (true) {
 				if (Socket.Available == 0) {
 					Thread.Sleep(500);
 				
 					if (HasRecievedMessage) {
-						// If SelectRead Poll is true, and there is no data available to read, that means the connection has terminated
-						// Unsure why readcheck == true and Socket.Available == 0 when socket first connects, it works correctly after that
+						// If SelectRead Poll is true, and there is no data available to read
+						// that means the connection has terminated
+						// Unsure why readcheck == true and Socket.Available == 0 when socket first connects
+						// it works correctly after that
 						bool readCheck = Socket.Poll(100, SelectMode.SelectRead);
 						if (readCheck) {
 							_isAlive = false;
@@ -79,21 +83,21 @@ namespace P2PNetworking {
 					continue;
 				}
 
-	            int headerSize = MessageHeader.Size;
+				int headerSize = MessageHeader.Size;
 
 				ReadState state = RecieveData(headerSize);
 
 				// If connection died while recieving data, exit function
 				if (!IsAlive) return;
 
-	            MessageHeader header = MessageHeader.FromBytes(state.Buffer);
+				MessageHeader header = MessageHeader.FromBytes(state.Buffer);
 				HasRecievedMessage = true;
-
-	            if (header.ProtocolVersion < Node.MinimumSupportedVersion) {
-	                // Unsupported version
-					SendMessage(MessageType.UnsuportedProtocolVersion, null, false);
+				
+				if (header.ProtocolVersion < Node.MinimumSupportedVersion) {
+					// Unsupported version
+					SendMessage(MessageType.REQUEST_FAILED, null, false);
 					continue;
-	            }
+				}
 
 				byte[] content = null;
 
@@ -108,25 +112,31 @@ namespace P2PNetworking {
 
 				}
 				
-				// Send event to Node that a message was recieved
-				OnMessageReceived(header, content);
-				
-	        }
-
-	    }
-
-		protected virtual void OnMessageReceived(MessageHeader header, byte[] content) {
-
-			if (MessageReceived != null)
-				MessageReceived(this, new MessageReceivedArgs(header, content));
+				if (header.ContentType >= 128) {
+					// Message is a response, let the thread waiting for a response know about it
+					// do stuff ...
+					OnResponseReceived(header, content);
+				} else	{
+					// Send event to Node that a message was recieved
+					OnMessageReceived(header, content);
+				}
+			}
 
 		}
 
-		protected virtual void OnPeerDisconect() {
+		protected virtual void OnMessageReceived(MessageHeader header, byte[] content) {
+			if (MessageReceived != null)
+				MessageReceived(this, new MessageReceivedArgs(header, content));
+		}
 
+		protected virtual void OnPeerDisconect() {
 			if (PeerDisconected != null)
 				PeerDisconected(this, EventArgs.Empty);
+		}
 
+		protected virtual void OnResponseReceived(MessageHeader header, byte[] content) {
+			if (ResponseReceived != null)
+				ResponseReceived(this, new MessageReceivedArgs(header, content));
 		}
 
 		private ReadState RecieveData(int size) {
@@ -135,22 +145,21 @@ namespace P2PNetworking {
 			// Start to recieve data from client
 			BeginReceive(state);
    
-            while (!state.IsDone) {
+            		while (!state.IsDone) {
 				if (!IsAlive) return state;
 				// As data is read, check that message has not timed out
-                if (state.ElapsedTime > (1000 * 30)) {
-                    // too mutch Time has passed, send timeout to message 
-					SendMessage(MessageType.MessageTimeout, null, false);
+				if (state.ElapsedTime > (1000 * 30)) {
+					// too mutch Time has passed, send timeout to message 
+					SendMessage(MessageType.REQUEST_FAILED, null, false);
 					
 					// Reset state and begin waiting for next message
 					state.ResetState();
-					Socket.BeginReceive(state.Buffer, 0, size, 
-						SocketFlags.None, new AsyncCallback(DataRecieved), state);
-                }
-            }
+					Socket.BeginReceive(state.Buffer, 0, size, SocketFlags.None, new AsyncCallback(DataRecieved), state);
+				}
+			}
 
 			return state;
-
+			
 		}
 
 		public void SendMessage(MessageType type, byte[] content, bool forward) {
@@ -168,6 +177,10 @@ namespace P2PNetworking {
 		public void SendMessage(MessageHeader header, byte[] content) {
 	
 			// TODO make sending async
+			
+			// TODO if sending a request, a new thread should be started to await the response
+			// the new thread will subscribe to the ResponseRecieved event
+
 			Socket.Send(MessageHeader.GetBytes(header));
 			if (header.ContentLength != 0) Socket.Send(content);
 
@@ -212,17 +225,16 @@ namespace P2PNetworking {
 
 		}
 
-        private void OnConnectionTimeout(Object source, System.Timers.ElapsedEventArgs e) {
+		private void OnConnectionTimeout(Object source, System.Timers.ElapsedEventArgs e) {
 			if (HasRecievedMessage) return;
 			// Too much time has elapsed, send timeout to client
 			SendMessage(MessageType.ConnectionTimeout, null, false);
-			// After sending timeout response to client, wait up to 10 seconds before terminating the connection to allow the client to recieve the message
+			// After sending timeout response to client, wait up to 10 seconds before terminating the connection
+			// to allow the client to recieve the message
 			_isAlive = false;
 			Socket.Close(10);
 			OnPeerDisconect();
-        }
-
-		
+		}
 
 		class ReadState {
 			private DateTime startTime;
@@ -236,7 +248,6 @@ namespace P2PNetworking {
 				get => (DateTime.Now - startTime).TotalMilliseconds;
 			}
 			public byte[] Buffer;
-
 
 			public ReadState (int expectedSize) {
 				ExpectedSize = expectedSize;

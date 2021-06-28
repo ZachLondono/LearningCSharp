@@ -52,7 +52,8 @@ namespace P2PNetworking {
 
         public Node(int port, int backlog) {
  
-            Port = port;
+                
+ 			Port = port;
             Backlog = backlog;
             
             Console.WriteLine("Starting Peer...");
@@ -79,13 +80,17 @@ namespace P2PNetworking {
 
             MessageMap = new Dictionary<MessageType, OnMessageTypeRecieved>();
             
-            MessageMap.Add(MessageType.ConnectionCheck, delegate(ClientHandler source, MessageReceivedArgs args) {
-                Console.WriteLine("Connection check message recieved");
-                source.SendMessage(MessageType.SuccessfulConnection, null, false);
+            MessageMap.Add(MessageType.CONNECT, 
+					delegate(ClientHandler source, MessageReceivedArgs args) {
+                
+				Console.WriteLine("Connection check message recieved");
+                source.SendMessage(MessageType.REQUEST_SUCCESSFUL, null, false);
+
             });
             
-            MessageMap.Add(MessageType.SuccessfulConnection, delegate(ClientHandler source, MessageReceivedArgs args) {
-                Console.WriteLine("Successful Connection");
+	    	MessageMap.Add(MessageType.REQUEST_SUCCESSFUL, 
+					delegate(ClientHandler source, MessageReceivedArgs args) {
+				Console.WriteLine("Successful Connection");
             });
 
         }
@@ -93,11 +98,12 @@ namespace P2PNetworking {
         /// Begins listening for incoming connections
         public void ListenForConnections() {
 
-            IPHostEntry ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());
-			IPAddress iPAddress= ipHostInfo.AddressList[0];
-			IPEndPoint localEndPoint = new IPEndPoint(iPAddress, Port);
+		IPHostEntry ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());
+		IPAddress iPAddress= ipHostInfo.AddressList[0];
+		IPEndPoint localEndPoint = new IPEndPoint(iPAddress, Port);
 
-			Socket listener  = new Socket(iPAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+		Socket listener  = new Socket(iPAddress.AddressFamily, SocketType.Stream, 
+		ProtocolType.Tcp);
 
             try {
 
@@ -148,7 +154,7 @@ namespace P2PNetworking {
                         ClientHandler handler = AddPeer(host, port);
                         Console.WriteLine("Successful Connection to Peer: {0}:{1}", host, port);
 
-                        handler.SendMessage(MessageType.ConnectionCheck, null, false);
+                        handler.SendMessage(MessageType.CONNECT, null, false);
 
                     } catch (Exception e) {
                         // Error connecting to new peer, remove it from peers list
@@ -170,25 +176,31 @@ namespace P2PNetworking {
 
         public void OnMessageReceived(object source, MessageReceivedArgs message) {
 
-            ClientHandler sourceHandler = (ClientHandler) source;
+		Console.WriteLine("Message Recieved");
+		ClientHandler sourceHandler = (ClientHandler) source;
+		
+		// call the correct function for the request
+		OnMessageTypeRecieved value;
+		if (MessageMap.TryGetValue(message.Header.ContentType, out value)) {
+			value(sourceHandler, message);
+		}
+		
+		if (message.Header.Forward) {
+		
+			// TODO: check if this node has already seen this message, if it has, do not forward it
+			// A node knows that it has not seen a message already if it has
+			// 1. Time To Live has not already passed
+			// 2. Has not seen a message with the same reference number from the same source
 
-            Console.WriteLine("Message Recieved");
 
-            OnMessageTypeRecieved value;
- 
-            if (MessageMap.TryGetValue(message.Header.ContentType, out value)) {
-                value(sourceHandler, message);
-            }
-
-            if (message.Header.Forward) {
-                // TODO: check if this node has already seen this message, if it has, do not forward it
-                foreach (ClientHandler connection in Connections) {
-                    if(!sourceHandler.Equals(connection)) {
-                        sourceHandler.SendMessage(message.Header, message.Content);
-                    }
-                }
-            
-            }
+			// If message is marked to be forwarded, forward it to all connected peers
+			foreach (ClientHandler connection in Connections) {
+				if(!sourceHandler.Equals(connection)) {
+					sourceHandler.SendMessage(message.Header, message.Content);
+				}
+			}
+		
+		}
 
         }
 
