@@ -25,6 +25,7 @@ namespace P2PNetworking {
 		RESOURCE_DELETED = 134,
 		VERSION_UNSUPPORTED = 135,
 		NOT_IMPLEMENTED = 136,
+		REQUEST_TIMEOUT = 137
 	}
 
 	public struct MessageHeader {

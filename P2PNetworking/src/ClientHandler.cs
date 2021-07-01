@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Net.Sockets;
+using System.Collections.Generic;
 
 namespace P2PNetworking {
 	
@@ -24,28 +25,46 @@ namespace P2PNetworking {
 		public DateTime StartTime { get; }
 		public bool IsAlive { get => _isAlive; }
 
+		// Return true to unmap response from request refid/
+		public delegate bool OnReceivedResponse(MessageReceivedArgs args);
+
 		public delegate void MessageReceiveHandler(object source, MessageReceivedArgs args);
 		public event MessageReceiveHandler MessageReceived;
 
 		public delegate void PeerDisconectHandler(object source, EventArgs args);
 		public event PeerDisconectHandler PeerDisconected;
-	
-		private delegate void ResponseHandler(object source, MessageReceivedArgs args);
-		private event ResponseHandler ResponseReceived;
 
 		private bool _isAlive;
 		private bool HasRecievedMessage;
+		private Dictionary<short, OnReceivedResponse> ResponseDelegateMap;
+		private Dictionary<short, List<MessageReceivedArgs>> ResponseMap;
+		private HashSet<short> PendingRequests;
 
 		public ClientHandler(Socket socket) {
-	        	Socket = socket;
+			Socket = socket;
 			StartTime = DateTime.Now;
 			HasRecievedMessage = false;
 			_isAlive = true;
+
+			// Map of request references to their received responses
+			ResponseMap = new Dictionary<short, List<MessageReceivedArgs>>();
+
+			// Request Refrences of requests which have not received a response yet
+			// (TODO: include max wait time for request, once passed remove the waiting request)
+			PendingRequests = new HashSet<short>();
+
+			ResponseDelegateMap = new Dictionary<short, OnReceivedResponse>();
+
 		}
-		
 
 		public void Run() {
-		
+			
+			if (Thread.CurrentThread.Name == null) {
+				Thread.CurrentThread.Name = "ClientThread";
+				Node.WriteLine("Renamed ClientThread");
+			} else Node.WriteLine("Client thread already named");
+
+	
 			System.Timers.Timer timer = new System.Timers.Timer();
 			timer.Interval = 1000 * 60; // 1 Minute timeout
 			timer.Elapsed += OnConnectionTimeout;
@@ -95,7 +114,7 @@ namespace P2PNetworking {
 				
 				if (header.ProtocolVersion < Node.MinimumSupportedVersion) {
 					// Unsupported version
-					SendMessage(MessageType.REQUEST_FAILED, null, false);
+					SendMessage(MessageType.VERSION_UNSUPPORTED, null, false);
 					continue;
 				}
 
@@ -112,10 +131,35 @@ namespace P2PNetworking {
 
 				}
 				
-				if (header.ContentType >= 128) {
-					// Message is a response, let the thread waiting for a response know about it
-					// do stuff ...
-					OnResponseReceived(header, content);
+				if ((byte) (header.ContentType) >= 128) {
+
+					Node.WriteLine($"Response received for RefId: {header.ReferenceId}");
+
+					// Reference Id from the response
+					short refId = header.ReferenceId;					
+					// If refId is found in the hashset, store it's value in this (it should be the same as refId)
+					short waitingResponse;
+
+					if (PendingRequests.TryGetValue(refId, out waitingResponse)) {
+
+						// Map the response to the given request
+						MessageReceivedArgs newArgs = new MessageReceivedArgs(header, content);
+						List<MessageReceivedArgs> list;
+						if (!ResponseMap.TryGetValue(waitingResponse, out list)) {
+							list = new List<MessageReceivedArgs>();
+						} 
+						list.Add(newArgs);
+						
+						if (!ResponseMap.ContainsKey(waitingResponse))
+							ResponseMap.Add(waitingResponse, list);
+
+						OnReceivedResponse dele;
+						if (ResponseDelegateMap.TryGetValue(waitingResponse, out dele)) {
+							bool remove = dele(newArgs);
+							if (remove) ResponseDelegateMap.Remove(waitingResponse);
+						} // Else, this response is referencing an unknown request, we'll ignore it
+					}
+
 				} else	{
 					// Send event to Node that a message was recieved
 					OnMessageReceived(header, content);
@@ -133,24 +177,19 @@ namespace P2PNetworking {
 			if (PeerDisconected != null)
 				PeerDisconected(this, EventArgs.Empty);
 		}
-
-		protected virtual void OnResponseReceived(MessageHeader header, byte[] content) {
-			if (ResponseReceived != null)
-				ResponseReceived(this, new MessageReceivedArgs(header, content));
-		}
-
+	
 		private ReadState RecieveData(int size) {
 	
 			ReadState state = new ReadState(size);
 			// Start to recieve data from client
 			BeginReceive(state);
-   
-            		while (!state.IsDone) {
+			
+			while (!state.IsDone) {
 				if (!IsAlive) return state;
 				// As data is read, check that message has not timed out
 				if (state.ElapsedTime > (1000 * 30)) {
 					// too mutch Time has passed, send timeout to message 
-					SendMessage(MessageType.REQUEST_FAILED, null, false);
+					SendMessage(MessageType.REQUEST_TIMEOUT, null, false);
 					
 					// Reset state and begin waiting for next message
 					state.ResetState();
@@ -169,6 +208,7 @@ namespace P2PNetworking {
 			header.ContentType = type;
 			header.ContentLength = content == null ? 0 : content.Length;
 			header.Forward = forward;
+			header.ReferenceId = -1; // TODO get atomic ref id
 
 			SendMessage(header, content);
 
@@ -181,8 +221,26 @@ namespace P2PNetworking {
 			// TODO if sending a request, a new thread should be started to await the response
 			// the new thread will subscribe to the ResponseRecieved event
 
+			if ((byte) (header.ContentType) < 128) {
+				// If this is sending a request, add it to list of pending requests
+				PendingRequests.Add(header.ReferenceId);
+			}
+
 			Socket.Send(MessageHeader.GetBytes(header));
 			if (header.ContentLength != 0) Socket.Send(content);
+		
+		}
+
+		public void SendRequest(MessageHeader header, byte[] content, OnReceivedResponse onResponse) {
+
+			SendMessage(header, content);
+			
+			// Make sure it is actually a request, then map the return function
+			if ((byte) (header.ContentType) < 128) {
+				Node.WriteLine($"Mapping delegate to request RefId {header.ReferenceId}");
+				// store the ResponseHandler delegate in a map, mapped to this request
+				ResponseDelegateMap.Add(header.ReferenceId, onResponse);
+			} 
 
 		}
 
@@ -194,7 +252,7 @@ namespace P2PNetworking {
 					state.ExpectedSize - state.TotalRecieved,
 					SocketFlags.None, new AsyncCallback(DataRecieved), state);
 			} catch (SocketException e) {					
-				Console.WriteLine("Exception occurred while reading from peer:\n{0}", e.ToString());
+				Node.WriteLine($"Exception occurred while reading from peer:\n{e.ToString()}");
 				_isAlive = false;
 				OnPeerDisconect();
 			}
@@ -210,7 +268,7 @@ namespace P2PNetworking {
 			try {
 				recieved = Socket.EndReceive(ar);
 			} catch (SocketException e) {					
-				Console.WriteLine("Exception occurred while reading from peer:\n{0}", e.ToString());
+				Node.WriteLine($"Exception occurred while reading from peer:\n{e.ToString()}");
 				_isAlive = false;
 				OnPeerDisconect();
 				return;
@@ -228,7 +286,7 @@ namespace P2PNetworking {
 		private void OnConnectionTimeout(Object source, System.Timers.ElapsedEventArgs e) {
 			if (HasRecievedMessage) return;
 			// Too much time has elapsed, send timeout to client
-			SendMessage(MessageType.ConnectionTimeout, null, false);
+			SendMessage(MessageType.REQUEST_TIMEOUT, null, false);
 			// After sending timeout response to client, wait up to 10 seconds before terminating the connection
 			// to allow the client to recieve the message
 			_isAlive = false;
@@ -263,6 +321,7 @@ namespace P2PNetworking {
 
 		}
 
-	}
+
+	}	
 
 }
