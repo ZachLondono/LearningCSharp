@@ -47,6 +47,19 @@ namespace P2PNetworking {
         private List<ClientHandler> Connections { get; set;}
         private readonly int Port;
         private readonly int Backlog;
+		
+		private int _refIdCounter = 0;
+		private int ReferenceIdCounter  {
+
+			get {
+				// Lock the node when retreiving the next ReferenceId to avoid reusing the same refid during a session
+				lock (this) {
+					_refIdCounter++;
+				}
+				return _refIdCounter;
+			}
+
+		}
 
 		public Node() : this(11000, 10) {            
 			// Start on default port
@@ -102,30 +115,68 @@ namespace P2PNetworking {
 			
 			MessageMap.Add(MessageType.REQUEST_PEERS, delegate(ClientHandler source, MessageReceivedArgs args) {
 				Node.WriteLine("Peers requested");
-				source.SendMessage(MessageType.NOT_IMPLEMENTED, null, false);
+
+				MessageHeader header = new MessageHeader();
+				header.ProtocolVersion = Convert.ToByte(Node.Version);
+				header.ContentType = MessageType.NOT_IMPLEMENTED;
+				header.ContentLength = 0;
+				header.Forward = false;
+				header.ReferenceId = args.Header.ReferenceId;
+
+				source.SendMessage(header, null);
+
 			});
 
 			MessageMap.Add(MessageType.REQUEST_RESOURCE, delegate(ClientHandler source, MessageReceivedArgs args) {
 				Node.WriteLine("Resource requested");
-				source.SendMessage(MessageType.NOT_IMPLEMENTED, null, false);
+				MessageHeader header = new MessageHeader();
+				header.ProtocolVersion = Convert.ToByte(Node.Version);
+				header.ContentType = MessageType.NOT_IMPLEMENTED;
+				header.ContentLength = 0;
+				header.Forward = false;
+				header.ReferenceId = args.Header.ReferenceId;
+
+				source.SendMessage(header, null);
 			});
 
 			MessageMap.Add(MessageType.CREATE_RESOURCE, delegate(ClientHandler source, MessageReceivedArgs args) {
 				Node.WriteLine("Creation requested");
-				source.SendMessage(MessageType.NOT_IMPLEMENTED, null, false);
+				MessageHeader header = new MessageHeader();
+				header.ProtocolVersion = Convert.ToByte(Node.Version);
+				header.ContentType = MessageType.NOT_IMPLEMENTED;
+				header.ContentLength = 0;
+				header.Forward = false;
+				header.ReferenceId = args.Header.ReferenceId;
+
+				source.SendMessage(header, null);
 			});
 
 			MessageMap.Add(MessageType.UPDATE_RESOURCE, delegate(ClientHandler source, MessageReceivedArgs args) {
 				Node.WriteLine("Update requested");
-				source.SendMessage(MessageType.NOT_IMPLEMENTED, null, false);
+				MessageHeader header = new MessageHeader();
+				header.ProtocolVersion = Convert.ToByte(Node.Version);
+				header.ContentType = MessageType.NOT_IMPLEMENTED;
+				header.ContentLength = 0;
+				header.Forward = false;
+				header.ReferenceId = args.Header.ReferenceId;
+
+				source.SendMessage(header, null);
 			});
 
 			MessageMap.Add(MessageType.DELETE_RESOURCE, delegate(ClientHandler source, MessageReceivedArgs args) {
 				Node.WriteLine("Deletion requested");
-				source.SendMessage(MessageType.NOT_IMPLEMENTED, null, false);
+				MessageHeader header = new MessageHeader();
+				header.ProtocolVersion = Convert.ToByte(Node.Version);
+				header.ContentType = MessageType.NOT_IMPLEMENTED;
+				header.ContentLength = 0;
+				header.Forward = false;
+				header.ReferenceId = args.Header.ReferenceId;
+
+				source.SendMessage(header, null);
 			});
 
-        }
+
+		}
 
         /// Begins listening for incoming connections
         public void ListenForConnections() {
@@ -193,7 +244,7 @@ namespace P2PNetworking {
 						header.ContentType = MessageType.CONNECT;
 						header.ContentLength = 0;
 						header.Forward = false;
-						header.ReferenceId = 1;
+						header.ReferenceId = ReferenceIdCounter;
 	
 						handler.SendRequest(header, null, delegate(MessageReceivedArgs args) {
 							Node.WriteLine($"Response to connection request recieved: {args.Header.ContentType}");
@@ -310,7 +361,7 @@ namespace P2PNetworking {
 			if (rows < 1) Console.Write("Error saving new peer");
 
 		}
-
-    }
+ 
+	}
 
 }
