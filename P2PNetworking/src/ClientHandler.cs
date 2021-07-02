@@ -114,7 +114,14 @@ namespace P2PNetworking {
 				
 				if (header.ProtocolVersion < Node.MinimumSupportedVersion) {
 					// Unsupported version
-					SendMessage(MessageType.VERSION_UNSUPPORTED, null, false);
+					MessageHeader responseHeader = new MessageHeader();
+					responseHeader.ProtocolVersion = Node.Version;
+					responseHeader.ContentType = MessageType.VERSION_UNSUPPORTED;
+					responseHeader.ReferenceId = header.ReferenceId;
+					responseHeader.ContentLength = 0;
+					responseHeader.Forward = false;
+
+					SendMessage(responseHeader, null);
 					continue;
 				}
 
@@ -188,6 +195,7 @@ namespace P2PNetworking {
 				if (!IsAlive) return state;
 				// As data is read, check that message has not timed out
 				if (state.ElapsedTime > (1000 * 30)) {
+					// TODO: set reference id for response
 					// too mutch Time has passed, send timeout to message 
 					SendMessage(MessageType.REQUEST_TIMEOUT, null, false);
 					
