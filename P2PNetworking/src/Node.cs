@@ -37,8 +37,8 @@ namespace P2PNetworking {
 			Console.WriteLine($"[Thread: {Thread.CurrentThread.Name}] :: {val}");
 		} 
 
-        public static readonly int Version = 1;
-        public static readonly int MinimumSupportedVersion = 1;
+        public static readonly byte Version = 1;
+        public static readonly byte MinimumSupportedVersion = 1;
 
         public delegate void OnMessageTypeRecieved(ClientHandler source, MessageReceivedArgs args);
 
@@ -48,8 +48,8 @@ namespace P2PNetworking {
         private readonly int Port;
         private readonly int Backlog;
 		
-		private int _refIdCounter = 0;
-		private int ReferenceIdCounter  {
+		private short _refIdCounter = 0;
+		private short ReferenceIdCounter  {
 
 			get {
 				// Lock the node when retreiving the next ReferenceId to avoid reusing the same refid during a session
@@ -94,7 +94,19 @@ namespace P2PNetworking {
 			        port INTEGER
 			    );
 			";
-			Node.WriteLine("Creating peers Table if it does not yet exist");
+			Node.WriteLine("Creating peers table if it does not yet exist");
+			command.ExecuteNonQuery();
+
+			// Create the data table if it does not exist
+			command = DBConnection.CreateCommand();
+			command.CommandText = 
+			@"
+				CREATE TABLE IF NOT EXISTS data (
+					key BLOB,
+					value BLOB
+				);
+			";
+			Node.WriteLine("Creating data table if it does not yet exist");
 			command.ExecuteNonQuery();
 
 			// Map certain requests to specific function calls
