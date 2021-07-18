@@ -131,7 +131,7 @@ namespace P2PNetworking {
 
 				// Once header is recieved, read the content
 				if (header.ContentLength > 0) {
-					
+	
 					ReadState contentState = RecieveData(header.ContentLength);
 
 					if (!IsAlive) return;
@@ -188,7 +188,7 @@ namespace P2PNetworking {
 		}
 	
 		private ReadState RecieveData(int size) {
-	
+
 			ReadState state = new ReadState(size);
 			// Start to recieve data from client
 			BeginReceive(state);
@@ -247,6 +247,11 @@ namespace P2PNetworking {
 			
 			// Make sure it is actually a request, then map the return function
 			if ((byte) (header.ContentType) < 128) {
+				if (ResponseDelegateMap.ContainsKey(header.ReferenceId)) {
+					Node.WriteLine($"Error mapping to request RefId {header.ReferenceId}, RefId already mapped");
+					return;
+				}
+
 				Node.WriteLine($"Mapping delegate to request RefId {header.ReferenceId}");
 				// store the ResponseHandler delegate in a map, mapped to this request
 				ResponseDelegateMap.Add(header.ReferenceId, onResponse);
