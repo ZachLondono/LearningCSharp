@@ -1,11 +1,11 @@
 ﻿using Microsoft.Data.Sqlite;
 using System;
+using System.IO;
+using System.Text;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Collections.Generic;
-
-using System.Runtime.InteropServices;
 
 namespace P2PNetworking {
  
@@ -47,7 +47,11 @@ namespace P2PNetworking {
         private List<ClientHandler> Connections { get; set;}
         private readonly int Port;
         private readonly int Backlog;
-		
+
+		public int ActiveConnections {
+			get => Connections.Count;
+		}
+
 		private short _refIdCounter = 0;
 		private short ReferenceIdCounter  {
 
@@ -75,7 +79,7 @@ namespace P2PNetworking {
 			Port = port;
 			Backlog = backlog;
 
-			Node.WriteLine("Starting Peer...");
+			Node.WriteLine("Starting Node...");
 
 			// List to store connections
 			Connections = new List<ClientHandler>();
@@ -115,6 +119,10 @@ namespace P2PNetworking {
 			MessageMap.Add(MessageType.CONNECT, delegate(ClientHandler source, MessageReceivedArgs args) {				
 				Node.WriteLine("Connection check message recieved");
 
+				// This is the first message that a potential peer should send when attempting to connect.
+				// The receiving node should check that this message has been received before accepting any further requests
+				// When this message is received, the node should check that the connecting peer has not been blacklisted before allowing it to connect
+
 				MessageHeader header = new MessageHeader();
 				header.ProtocolVersion = Convert.ToByte(Node.Version);
 				header.ContentType = MessageType.REQUEST_SUCCESSFUL;
@@ -142,25 +150,90 @@ namespace P2PNetworking {
 
 			MessageMap.Add(MessageType.REQUEST_RESOURCE, delegate(ClientHandler source, MessageReceivedArgs args) {
 				Node.WriteLine("Resource requested");
+
+				// Start initilizing the message response header
 				MessageHeader header = new MessageHeader();
 				header.ProtocolVersion = Convert.ToByte(Node.Version);
-				header.ContentType = MessageType.NOT_IMPLEMENTED;
-				header.ContentLength = 0;
 				header.Forward = false;
 				header.ReferenceId = args.Header.ReferenceId;
 
-				source.SendMessage(header, null);
+				// Get the key from the request				
+				var key = args.Content;
+
+				if (key == null) {
+					header.ContentType = MessageType.INVALID_REQUEST;
+					header.ContentLength = 0;
+					source.SendMessage(header, null);
+					return;
+				}
+
+				// Query the database for the key	
+				var command = DBConnection.CreateCommand();
+				command.CommandText = $"SELECT value FROM data WHERE key = $key;";
+				command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
+
+				byte[] buffer = null;
+				using (var reader = command.ExecuteReader()) {
+					if (reader.HasRows) {
+						// If the record exists, add it to the response message
+						buffer = GetBytes(reader);
+						header.ContentType = MessageType.REQUEST_SUCCESSFUL;
+						header.ContentLength = buffer.Length;
+					} else {
+						// If the record doesn't exist, repond with a RESOURCE_NOT_FOUND error
+						header.ContentType = MessageType.RESOURCE_NOT_FOUND;
+						header.ContentLength = 0;
+					}
+				}
+
+				source.SendMessage(header, buffer);
+
 			});
 
 			MessageMap.Add(MessageType.CREATE_RESOURCE, delegate(ClientHandler source, MessageReceivedArgs args) {
 				Node.WriteLine("Creation requested");
+
 				MessageHeader header = new MessageHeader();
 				header.ProtocolVersion = Convert.ToByte(Node.Version);
-				header.ContentType = MessageType.NOT_IMPLEMENTED;
-				header.ContentLength = 0;
 				header.Forward = false;
 				header.ReferenceId = args.Header.ReferenceId;
+				header.ContentLength = 0;
 
+				var content = args.Content;
+				if (content == null || content.Length <= 256) {
+					header.ContentType = MessageType.INVALID_REQUEST;
+					source.SendMessage(header, null);
+					return;
+				}
+
+				byte[] key = new byte[256];
+				byte[] value = new byte[content.Length - 256];
+
+				System.Buffer.BlockCopy(content, 0, key, 0, key.Length);
+				System.Buffer.BlockCopy(content, key.Length, value, 0, content.Length - key.Length);
+
+				// Check if resource already exists
+				var command = DBConnection.CreateCommand();
+				command.CommandText = $"SELECT 1 FROM data WHERE key = $key LIMIT 1;";
+				command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
+				using (var reader = command.ExecuteReader()) {
+					if (reader.HasRows) {
+						// Key already exists in db;
+						header.ContentType = MessageType.RESOURCE_ALREADY_EXISTS;
+						source.SendMessage(header, null);
+						return;
+					}
+				}
+
+				// Insert new resource into databse
+				command = DBConnection.CreateCommand();
+				command.CommandText = $"INSERT INTO data (key, value) VALUES ( $key ,  $value );";
+				command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
+				command.Parameters.Add("$value", SqliteType.Blob, value.Length).Value = value;
+
+				int rows = command.ExecuteNonQuery();
+
+				header.ContentType = MessageType.RESOURCE_CREATED;
 				source.SendMessage(header, null);
 			});
 
@@ -379,7 +452,37 @@ namespace P2PNetworking {
 			if (rows < 1) Console.Write("Error saving new peer");
 
 		}
+
+		public void SendRequest(MessageHeader message, byte[] content, ClientHandler.OnReceivedResponse responseDelegate) {
+
+			foreach (ClientHandler peer in Connections) 
+				peer.SendRequest(message, content, responseDelegate);
+
+		}
  
+		private byte[] GetBytes(SqliteDataReader reader) {
+
+			// reads a blob of bytes from the reader in chunks of CHUNK_SIZE, then returns them in a single array
+			const int CHUNK_SIZE = 2 * 1024;
+			byte[] buffer = new byte[CHUNK_SIZE];
+			long bytesRead;
+			long fieldOffset = 0;
+
+			using (MemoryStream stream = new MemoryStream()) {
+
+				// Continue reading bytes, as long as there is more data to read
+				while ((bytesRead = reader.GetBytes(0, fieldOffset, buffer, 1, buffer.Length)) > 0) {
+					stream.Write(buffer, 0, (int)bytesRead);
+					fieldOffset += bytesRead;					
+				}
+
+				// convert all the data to a single buffer
+				return stream.ToArray();
+
+			}
+
+		}
+
 	}
 
 }
