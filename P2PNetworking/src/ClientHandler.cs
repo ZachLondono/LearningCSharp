@@ -24,6 +24,7 @@ namespace P2PNetworking {
 		public Socket Socket { get; }
 		public DateTime StartTime { get; }
 		public bool IsAlive { get => _isAlive; }
+		public bool ConnectionAccepted { get; set; }
 
 		// Return true to unmap response from request refid/
 		public delegate bool OnReceivedResponse(MessageReceivedArgs args);
@@ -45,6 +46,7 @@ namespace P2PNetworking {
 			StartTime = DateTime.Now;
 			HasRecievedMessage = false;
 			_isAlive = true;
+			ConnectionAccepted = false;
 
 			// Map of request references to their received responses
 			ResponseMap = new Dictionary<short, List<MessageReceivedArgs>>();

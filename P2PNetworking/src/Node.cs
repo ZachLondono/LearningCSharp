@@ -123,6 +123,7 @@ namespace P2PNetworking {
 				header.ReferenceId = args.Header.ReferenceId;
 
 				source.SendMessage(header, null);
+				source.ConnectionAccepted = true;
 			});
 			
 			MessageMap.Add(MessageType.REQUEST_PEERS, delegate(ClientHandler source, MessageReceivedArgs args) {
@@ -283,6 +284,11 @@ namespace P2PNetworking {
 
 			Node.WriteLine("Message Recieved");
 			ClientHandler sourceHandler = (ClientHandler) source;
+
+			if (message.Header.ContentType != MessageType.CONNECT && !sourceHandler.ConnectionAccepted) {
+				// If the peer is sending a request, prior to requesting to connect, ignore the request
+				return;
+			}
 
 			// call the correct function for the request
 			OnMessageTypeRecieved value;
