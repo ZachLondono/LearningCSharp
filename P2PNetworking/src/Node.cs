@@ -235,30 +235,80 @@ namespace P2PNetworking {
 
 				header.ContentType = MessageType.RESOURCE_CREATED;
 				source.SendMessage(header, null);
+
 			});
 
 			MessageMap.Add(MessageType.UPDATE_RESOURCE, delegate(ClientHandler source, MessageReceivedArgs args) {
 				Node.WriteLine("Update requested");
+
 				MessageHeader header = new MessageHeader();
 				header.ProtocolVersion = Convert.ToByte(Node.Version);
-				header.ContentType = MessageType.NOT_IMPLEMENTED;
-				header.ContentLength = 0;
 				header.Forward = false;
 				header.ReferenceId = args.Header.ReferenceId;
+				header.ContentLength = 0;
 
+				var content = args.Content;
+				if (content == null || content.Length <= 256) {
+					header.ContentType = MessageType.INVALID_REQUEST;
+					source.SendMessage(header, null);
+					return;
+				}
+
+				byte[] key = new byte[256];
+				byte[] value = new byte[content.Length - 256];
+
+				System.Buffer.BlockCopy(content, 0, key, 0, key.Length);
+				System.Buffer.BlockCopy(content, key.Length, value, 0, content.Length - key.Length);
+
+				// Insert new resource into databse
+				command = DBConnection.CreateCommand();
+				command.CommandText = $"INSERT INTO data (key, value) VALUES ( $key ,  $value );";
+				command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
+				command.Parameters.Add("$value", SqliteType.Blob, value.Length).Value = value;
+
+				int rows = command.ExecuteNonQuery();
+
+				// If no rows where affected, the update failed
+				if (rows == 0) header.ContentType = MessageType.RESOURCE_NOT_FOUND;
+				else header.ContentType = MessageType.RESOURCE_UPDATED;
 				source.SendMessage(header, null);
+
 			});
 
 			MessageMap.Add(MessageType.DELETE_RESOURCE, delegate(ClientHandler source, MessageReceivedArgs args) {
 				Node.WriteLine("Deletion requested");
+
 				MessageHeader header = new MessageHeader();
 				header.ProtocolVersion = Convert.ToByte(Node.Version);
-				header.ContentType = MessageType.NOT_IMPLEMENTED;
-				header.ContentLength = 0;
 				header.Forward = false;
 				header.ReferenceId = args.Header.ReferenceId;
+				header.ContentLength = 0;
+
+				var content = args.Content;
+				if (content == null || content.Length <= 256) {
+					header.ContentType = MessageType.INVALID_REQUEST;
+					source.SendMessage(header, null);
+					return;
+				}
+
+				byte[] key = new byte[256];
+				System.Buffer.BlockCopy(content, 0, key, 0, key.Length);
+
+				// Insert new resource into databse
+				var command = DBConnection.CreateCommand();
+				command.CommandText = $"DELETE FROM data WHERE key = $key";
+				command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
+
+				int rows = command.ExecuteNonQuery();
+
+				// If no rows where affected, the resource did not exist
+				if (rows == 0)
+					header.ContentType = MessageType.RESOURCE_NOT_FOUND;
+				else header.ContentType = MessageType.RESOURCE_DELETED; 
 
 				source.SendMessage(header, null);
+
+			
 			});
 
 
