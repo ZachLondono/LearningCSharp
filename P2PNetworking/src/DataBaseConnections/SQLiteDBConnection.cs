@@ -3,27 +3,11 @@ using System.Collections.Generic;
 
 namespace P2PNetworking {
 
-	public struct Data {
-		byte[] key;
-		byte[] value;
-	}
-
-	public struct Peer {
-		public string Host { get; }
-		public int Port { get; }
-
-		public Peer(string host, int port) {
-			Host = host;
-			Port = port;
-		}
-
-	}
-
-	public class DBInterface {
+	public class SQLiteDBConnection : IDBInterface  {
 	
-        private SqliteConnection DBConnection { get; }
+		private SqliteConnection DBConnection { get; }
 
-		public DBInterface(string storageDirectory) {
+		public SQLiteDBConnection(string storageDirectory) {
 
 			// Verify that storage directory is a valid directory
 			bool exists = System.IO.Directory.Exists(storageDirectory);
@@ -35,7 +19,7 @@ namespace P2PNetworking {
 
 		}
 
-		private void CreateTableIfNotExist(string name, string[] columns) {
+		public void CreateTableIfNotExist(string name, string[] columns) {
 
 			var queryString = $"CREATE IF NOT EXISTS {name} (";
 			for (int i = 0; i < columns.Length; i++) {
