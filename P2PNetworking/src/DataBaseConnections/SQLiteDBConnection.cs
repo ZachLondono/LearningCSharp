@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using System.Collections.Generic;
+using System.IO;
 
 namespace P2PNetworking {
 
@@ -24,7 +25,7 @@ namespace P2PNetworking {
 
 			DBConnection.Open();
 
-			System.Console.WriteLine("Creating peer Table");
+			System.Console.WriteLine("Creating peers Table");
 			CreateTableIfNotExist("peers", new string[]{"host VARCHAR(255)", "port INTEGER"});
 			System.Console.WriteLine("Creating data Table");
 			CreateTableIfNotExist("data", new string[]{"key BLOB", "value BLOB"});
@@ -38,8 +39,6 @@ namespace P2PNetworking {
 				if (i < columns.Length - 1) queryString += ",\n";
 			}
 			queryString += "\n);";
-
-			//System.Console.WriteLine($"SQL Query: \"{queryString}\"");
 
 			var command = DBConnection.CreateCommand();
 			command.CommandText = queryString;
@@ -93,19 +92,17 @@ namespace P2PNetworking {
 		}
 
 		public byte[] SelectData(string dataCol, string conditionCol, byte[] conditionVal) {
-	
-			// Returns data from dataCol where conditionCol = ConditionVal
+
 			var command = DBConnection.CreateCommand();
-			command.CommandText = "SELECT $dataCol FROM data WHERE $conditionCol = $conditionalVal;";
-			command.Parameters.AddWithValue("$dataCol",dataCol);
-			command.Parameters.AddWithValue("$conditionCol",conditionCol);
-			command.Parameters.Add("$conditionVal", SqliteType.Blob, conditionVal.Length).Value = conditionVal;
+			command.CommandText = $"SELECT {dataCol} FROM data WHERE {conditionCol} = $conditionalVal;";
+			command.Parameters.Add("$conditionalVal", SqliteType.Blob, conditionVal.Length).Value = conditionVal;
 
 			using (var reader = command.ExecuteReader()) {
-				// READ BYTES
+				if (!reader.HasRows) return null;
+				reader.Read();
+				return (byte[])reader.GetValue(0);
 			}
-
-			return null;
+		
 		}	
 
 		public List<Peer> GetPeers() {
@@ -170,5 +167,4 @@ namespace P2PNetworking {
 		// public void BlackListPeer(Peer badPeer) { } 
 
 	}
-
 }
