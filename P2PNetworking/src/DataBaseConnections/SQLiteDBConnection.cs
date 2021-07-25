@@ -7,38 +7,51 @@ namespace P2PNetworking {
 	
 		private SqliteConnection DBConnection { get; }
 
-		public SQLiteDBConnection(string storageDirectory) {
+		public SQLiteDBConnection(string? storageDirectory) {
 
-			// Verify that storage directory is a valid directory
-			bool exists = System.IO.Directory.Exists(storageDirectory);
+			System.Console.WriteLine("Starting SQLite DB");
 
-			if (!exists) throw new System.ArgumentException("Invalid storage directory, can't connect to database");
+			if (storageDirectory != null) {
+				// Verify that storage directory is a valid directory
+				bool exists = System.IO.Directory.Exists(storageDirectory);
+	
+				if (!exists) throw new System.ArgumentException("Invalid storage directory, can't connect to database");
+	
+				DBConnection = new SqliteConnection($"Data Source={storageDirectory}/Peer2Peer.db");
+			} else {
+				DBConnection = new SqliteConnection("Data Source=Peer2Peer.db");
+			}
 
-			DBConnection = new SqliteConnection($"Data Source={storageDirectory}/Peer.db");
 			DBConnection.Open();
 
+			System.Console.WriteLine("Creating peer Table");
+			CreateTableIfNotExist("peers", new string[]{"host VARCHAR(255)", "port INTEGER"});
+			System.Console.WriteLine("Creating data Table");
+			CreateTableIfNotExist("data", new string[]{"key BLOB", "value BLOB"});
 		}
 
 		public void CreateTableIfNotExist(string name, string[] columns) {
 
-			var queryString = $"CREATE IF NOT EXISTS {name} (";
+			var queryString = $"CREATE TABLE IF NOT EXISTS {name} \n(\n";
 			for (int i = 0; i < columns.Length; i++) {
-				queryString += columns[i];
+				queryString += "\t" + columns[i];
 				if (i < columns.Length - 1) queryString += ",\n";
 			}
-			queryString += "\n)";
+			queryString += "\n);";
+
+			//System.Console.WriteLine($"SQL Query: \"{queryString}\"");
 
 			var command = DBConnection.CreateCommand();
 			command.CommandText = queryString;
 
-			command.ExecuteNonQueryAsync();
+			command.ExecuteNonQuery();
 
 		}
 
 		public bool ContainsKey(byte[] key) {
-			
+		
 			var command = DBConnection.CreateCommand();
-			command.CommandText = "SELECT * WHERE key = $key";
+			command.CommandText = "SELECT * FROM data WHERE key = $key";
 			command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
 			
 			var reader = command.ExecuteReader();
@@ -47,28 +60,36 @@ namespace P2PNetworking {
 
 		}
 
-		public bool InsertPair(byte[] key, byte[] value) {
+		public bool InsertPair(DataPair pair) {
 
 			// Inserts the key value pair, there should only be one instance of key
 			// NOTE: this is likely susceptible to duplicate keys in the case of a race condition
 
 			var command = DBConnection.CreateCommand();
-			command.CommandText = @"BEGIN
-									IF NOT EXISTS (SELECT * FROM data WHERE key = $key)
-									BEGIN
-										INSERT INTO data (key, value) VALUES ( $key, $value )
-										END
-									END;";
-			command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
-			command.Parameters.Add("$value", SqliteType.Blob, value.Length).Value = value;
+			command.CommandText = @"
+						INSERT INTO data(key, value)
+						SELECT $key, $value
+						WHERE NOT EXISTS (SELECT 1 FROM data WHERE key = $key) 
+						";
+
+			command.Parameters.Add("$key", SqliteType.Blob, pair.Key.Length).Value = pair.Key;
+			command.Parameters.Add("$value", SqliteType.Blob, pair.Value.Length).Value = pair.Value;
 			
 			// insertion was successful if 1 row was changed
 			int rows = command.ExecuteNonQuery();
-			if (rows != 1) 
-				Node.WriteLine($"ERROR inserting pair. Row altered: {rows}");
 
 			return rows == 1;
 
+		}
+
+		public bool RemoveKey(byte[] key) {
+
+			var command = DBConnection.CreateCommand();
+			command.CommandText = "DELETE FROM data WHERE key = $key;";
+			command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
+
+			int rows = command.ExecuteNonQuery();
+			return 1 == rows;
 		}
 
 		public byte[] SelectData(string dataCol, string conditionCol, byte[] conditionVal) {
@@ -110,12 +131,16 @@ namespace P2PNetworking {
 		public bool InsertPeer(Peer newPeer) {
 
 			var command = DBConnection.CreateCommand();
-			command.CommandText = "INSERT INTO peers (host, port) VALUES ( $host, $port);";
+			command.CommandText = @"
+						INSERT INTO peers (host, port)
+						SELECT $host, $port
+						WHERE NOT EXISTS (SELECT 1 FROM peers WHERE host = $host AND port = $port) 
+						";
 			command.Parameters.AddWithValue("$host", newPeer.Host);
 			command.Parameters.AddWithValue("$port", newPeer.Port);
 
-			return 1 == command.ExecuteNonQuery();
-
+			int rows = command.ExecuteNonQuery();
+			return 1 == rows;
 		}
 
 		public bool RemovePeer(Peer peer) {
@@ -126,6 +151,19 @@ namespace P2PNetworking {
 			command.Parameters.AddWithValue("$port", peer.Port);
 
 			return 1 == command.ExecuteNonQuery();
+
+		}
+
+		public bool ContainsPeer(Peer peer) {
+			
+			var command = DBConnection.CreateCommand();
+			command.CommandText = "SELECT * FROM peers WHERE host = $host AND port = $port";
+			command.Parameters.AddWithValue("$host", peer.Host);
+			command.Parameters.AddWithValue("$port", peer.Port);
+			
+			var reader = command.ExecuteReader();
+
+			return reader.HasRows;
 
 		}
 

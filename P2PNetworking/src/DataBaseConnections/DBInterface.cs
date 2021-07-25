@@ -3,11 +3,11 @@ using System.Collections.Generic;
 
 namespace P2PNetworking {
 
-	public struct Data {
-		byte[] Key;
-		byte[] Value;
+	public struct DataPair {
+		public byte[] Key { get; }
+		public byte[] Value { get; }
 		
-		public Data(byte[] key, byte[] value) {
+		public DataPair(byte[] key, byte[] value) {
 			Key = key;
 			Value = value;
 		}
@@ -26,13 +26,15 @@ namespace P2PNetworking {
 
 	public interface IDBInterface {
 
-		public void CreateTableIfNotExist(string name, string[] columns);
 		public bool ContainsKey(byte[] key);
-		public bool InsertPair(byte[] key, byte[] value);
+		public bool InsertPair(DataPair pair);
 		public byte[] SelectData(string dataCol, string conditionCol, byte[] conditionVal);
+		public bool RemoveKey(byte[] key);
+
 		public List<Peer> GetPeers(); 
 		public bool InsertPeer(Peer newPeer); 
 		public bool RemovePeer(Peer peer);
+		public bool ContainsPeer(Peer peer);
 		// public void BlackListPeer(Peer badPeer) { } 
 
 	}
