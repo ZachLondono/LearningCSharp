@@ -8,20 +8,16 @@ namespace P2PNetworking {
 	
 		private SqliteConnection DBConnection { get; }
 
-		public SQLiteDBConnection(string? storageDirectory) {
+		public SQLiteDBConnection(string storageDirectory) {
 
 			System.Console.WriteLine("Starting SQLite DB");
 
-			if (storageDirectory != null) {
-				// Verify that storage directory is a valid directory
-				bool exists = System.IO.Directory.Exists(storageDirectory);
+			// Verify that storage directory is a valid directory
+			bool exists = System.IO.Directory.Exists(storageDirectory);
 	
-				if (!exists) throw new System.ArgumentException("Invalid storage directory, can't connect to database");
+			if (!exists) throw new System.ArgumentException("Invalid storage directory, can't connect to database");
 	
-				DBConnection = new SqliteConnection($"Data Source={storageDirectory}/Peer2Peer.db");
-			} else {
-				DBConnection = new SqliteConnection("Data Source=Peer2Peer.db");
-			}
+			DBConnection = new SqliteConnection($"Data Source={storageDirectory}/Peer2Peer.db");
 
 			DBConnection.Open();
 
