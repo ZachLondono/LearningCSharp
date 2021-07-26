@@ -6,7 +6,6 @@ using System.Runtime.InteropServices;
 namespace P2PNetworking {
 
 	public enum MessageType : byte {
-
 		// Request Codes 
 		CONNECT = 1,
 		REQUEST_PEERS = 2,
