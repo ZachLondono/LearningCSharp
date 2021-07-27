@@ -9,44 +9,22 @@ using System.Collections.Generic;
 
 namespace P2PNetworking {
  
-    class Node {
-
-        static void Main(string[] args) {               
-
-            Node peer;
-            if (args.Length == 1) {
-
-                int port = Convert.ToInt32(args[0]);
-                peer = new Node(port, 10);
-
-            } else {
- 
-                peer = new Node();
- 
-            }
-
-            peer.ConnectToPeers();
-
-            Thread listenerThread = new Thread(new ThreadStart(peer.ListenForConnections));
-
-            listenerThread.Start();
-
-        }
+	class Node {
 
 		public static void WriteLine (string val) {
 			Console.WriteLine($"[Thread: {Thread.CurrentThread.Name}] :: {val}");
 		} 
 
-        public static readonly byte Version = 1;
-        public static readonly byte MinimumSupportedVersion = 1;
-
-        public delegate void OnMessageTypeRecieved(ClientHandler source, MessageReceivedArgs args);
-
-        private Dictionary<MessageType, OnMessageTypeRecieved> MessageMap;
-        private SqliteConnection DBConnection { get; set; }
-        private List<ClientHandler> Connections { get; set;}
-        private readonly int Port;
-        private readonly int Backlog;
+		public static readonly byte Version = 1;
+		public static readonly byte MinimumSupportedVersion = 1;
+		
+		public delegate void OnMessageTypeRecieved(ClientHandler source, MessageReceivedArgs args);
+		
+		private Dictionary<MessageType, OnMessageTypeRecieved> MessageMap;
+		private DBInterface DBConnection { get; set; }
+		private List<ClientHandler> Connections { get; set;}
+		private readonly int Port;
+		private readonly int Backlog;
 
 		public int ActiveConnections {
 			get => Connections.Count;
@@ -65,11 +43,11 @@ namespace P2PNetworking {
 
 		}
 
-		public Node() : this(11000, 10) {            
+		public Node() : this(11000, 10, new SQLiteDBConnection(".")) {            
 			// Start on default port
 		}
 
-        public Node(int port, int backlog) {
+		public Node(int port, int backlog, IDBInterface dbConnection) {
 
 			if (Thread.CurrentThread.Name == null) {	
 				Thread.CurrentThread.Name = "MainNodeThread";
@@ -78,6 +56,7 @@ namespace P2PNetworking {
 
 			Port = port;
 			Backlog = backlog;
+			DBConnection = dbConnection;
 
 			Node.WriteLine("Starting Node...");
 
@@ -85,33 +64,6 @@ namespace P2PNetworking {
 			Connections = new List<ClientHandler>();
 
 			Node.WriteLine("Opening Connection To Database...");
-			// Open new connection to database
-			DBConnection = new SqliteConnection("Data Source=Peer.db");
-			DBConnection.Open();
-
-			// If the peers table does not exist (first time stating this peer), create it
-			var command = DBConnection.CreateCommand();
-			command.CommandText = 
-			@"
-			    CREATE TABLE IF NOT EXISTS peers (
-			        host VARCHAR(100),
-			        port INTEGER
-			    );
-			";
-			Node.WriteLine("Creating peers table if it does not yet exist");
-			command.ExecuteNonQuery();
-
-			// Create the data table if it does not exist
-			command = DBConnection.CreateCommand();
-			command.CommandText = 
-			@"
-				CREATE TABLE IF NOT EXISTS data (
-					key BLOB,
-					value BLOB
-				);
-			";
-			Node.WriteLine("Creating data table if it does not yet exist");
-			command.ExecuteNonQuery();
 
 			// Map certain requests to specific function calls
 			MessageMap = new Dictionary<MessageType, OnMessageTypeRecieved>();
@@ -314,8 +266,8 @@ namespace P2PNetworking {
 
 		}
 
-        /// Begins listening for incoming connections
-        public void ListenForConnections() {
+		/// Begins listening for incoming connections
+		public void ListenForConnections() {
 			
 			if (Thread.CurrentThread.Name == null) {	
 				Thread.CurrentThread.Name = "ListeningThread";
@@ -346,11 +298,10 @@ namespace P2PNetworking {
 			} catch (Exception e) {
 				Console.Write("Unable to listen for connections " + e.ToString());
 			}
+		}
 
-        }
-
-        /// Connects to all known peers stored in local database
-        public void ConnectToPeers() {
+		/// Connects to all known peers stored in local database
+		public void ConnectToPeers() {
             
 			Node.WriteLine("Attempting to Connect to Known Peers");
 
@@ -388,6 +339,9 @@ namespace P2PNetworking {
 						});
 
  					} catch (Exception e) {
+						
+						Node.WriteLine(e.ToString());
+
 						// Error connecting to new peer, remove it from peers list
 						command = DBConnection.CreateCommand();
 						command.CommandText = "DELETE FROM peers WHERE host = $host AND port = $port;";
@@ -401,9 +355,9 @@ namespace P2PNetworking {
 				}
 
 			}
-        }
+		}
 
-        public void OnMessageReceived(object source, MessageReceivedArgs message) {
+		public void OnMessageReceived(object source, MessageReceivedArgs message) {
 
 			Node.WriteLine("Message Recieved");
 			ClientHandler sourceHandler = (ClientHandler) source;
@@ -437,9 +391,9 @@ namespace P2PNetworking {
 
 			}
 
-        }
+		}
 
-        public ClientHandler AddPeer(Socket socket) {
+		public ClientHandler AddPeer(Socket socket) {
 
 			// Start thread to handle communications with this socket
 			ClientHandler handler = new ClientHandler(socket);
@@ -484,7 +438,7 @@ namespace P2PNetworking {
 
 			// Check if peer already exists in table
 			check.CommandText = "SELECT 1 FROM peers WHERE host = $host AND port = $port;";
-			    check.Parameters.AddWithValue("$host", host);
+			check.Parameters.AddWithValue("$host", host);
 			check.Parameters.AddWithValue("$port", port);
 
 			using (var reader = check.ExecuteReader()) {
@@ -495,7 +449,7 @@ namespace P2PNetworking {
 			// Insert new peer into table
 			SqliteCommand insert = DBConnection.CreateCommand();
 			insert.CommandText = "INSERT INTO peers (host, port) VALUES ($host, $port);";
-			    insert.Parameters.AddWithValue("$host", host);
+			insert.Parameters.AddWithValue("$host", host);
 			insert.Parameters.AddWithValue("$port", port);
 
 			int rows = insert.ExecuteNonQuery();
