@@ -432,36 +432,13 @@ namespace P2PNetworking {
 		}
 
 		public void SavePeer(string host, int port) {
-
-			// store host and port in database, if they do not already exist
-			SqliteCommand check = DBConnection.CreateCommand();
-
-			// Check if peer already exists in table
-			check.CommandText = "SELECT 1 FROM peers WHERE host = $host AND port = $port;";
-			check.Parameters.AddWithValue("$host", host);
-			check.Parameters.AddWithValue("$port", port);
-
-			using (var reader = check.ExecuteReader()) {
-			    // If any rows are returned, it exists
-			    if (reader.HasRows) return;
-			}
-
-			// Insert new peer into table
-			SqliteCommand insert = DBConnection.CreateCommand();
-			insert.CommandText = "INSERT INTO peers (host, port) VALUES ($host, $port);";
-			insert.Parameters.AddWithValue("$host", host);
-			insert.Parameters.AddWithValue("$port", port);
-
-			int rows = insert.ExecuteNonQuery();
-			if (rows < 1) Console.Write("Error saving new peer");
-
+			Peer newPeer = new Peer(host, port);
+			DBConnection.InsertPeer(newPeer);
 		}
 
 		public void SendRequest(MessageHeader message, byte[] content, ClientHandler.OnReceivedResponse responseDelegate) {
-
 			foreach (ClientHandler peer in Connections) 
 				peer.SendRequest(message, content, responseDelegate);
-
 		}
  
 		private byte[] GetBytes(SqliteDataReader reader) {
