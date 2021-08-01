@@ -120,24 +120,17 @@ namespace P2PNetworking {
 				}
 
 				// Query the database for the key	
-				var command = DBConnection.CreateCommand();
-				command.CommandText = $"SELECT value FROM data WHERE key = $key;";
-				command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
-
-				byte[] buffer = null;
-				using (var reader = command.ExecuteReader()) {
-					if (reader.HasRows) {
-						// If the record exists, add it to the response message
-						buffer = GetBytes(reader);
-						header.ContentType = MessageType.REQUEST_SUCCESSFUL;
-						header.ContentLength = buffer.Length;
-					} else {
-						// If the record doesn't exist, repond with a RESOURCE_NOT_FOUND error
-						header.ContentType = MessageType.RESOURCE_NOT_FOUND;
-						header.ContentLength = 0;
-					}
+				byte[] data = DBConnection.SelectData("value", "key", key);;
+				if (data != null) {
+					// If the record exists, add it to the response message
+					header.ContentType = MessageType.REQUEST_SUCCESSFUL;
+					header.ContentLength = data;
+				} else {
+					// If the record doesn't exist, repond with a RESOURCE_NOT_FOUND error
+					header.ContentType = MessageType.RESOURCE_NOT_FOUND;
+					header.ContentLength = 0;
 				}
-
+				
 				source.SendMessage(header, buffer);
 
 			});
@@ -164,28 +157,11 @@ namespace P2PNetworking {
 				System.Buffer.BlockCopy(content, 0, key, 0, key.Length);
 				System.Buffer.BlockCopy(content, key.Length, value, 0, content.Length - key.Length);
 
-				// Check if resource already exists
-				var command = DBConnection.CreateCommand();
-				command.CommandText = $"SELECT 1 FROM data WHERE key = $key LIMIT 1;";
-				command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
-				using (var reader = command.ExecuteReader()) {
-					if (reader.HasRows) {
-						// Key already exists in db;
-						header.ContentType = MessageType.RESOURCE_ALREADY_EXISTS;
-						source.SendMessage(header, null);
-						return;
-					}
-				}
-
-				// Insert new resource into databse
-				command = DBConnection.CreateCommand();
-				command.CommandText = $"INSERT INTO data (key, value) VALUES ( $key ,  $value );";
-				command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
-				command.Parameters.Add("$value", SqliteType.Blob, value.Length).Value = value;
-
-				int rows = command.ExecuteNonQuery();
-
-				header.ContentType = MessageType.RESOURCE_CREATED;
+				DataPair newDataPair = new DataPair(key, value);
+				bool wasInserted = DBConnection.InsertPair(newDataPair);
+				
+				if (wasInserted) header.ContentType = MessageType.RESOURCE_CREATED;
+				else header.ContentType = MessageType.RESOURCE_ALREADY_EXISTS;
 				source.SendMessage(header, null);
 
 			});
@@ -212,16 +188,10 @@ namespace P2PNetworking {
 				System.Buffer.BlockCopy(content, 0, key, 0, key.Length);
 				System.Buffer.BlockCopy(content, key.Length, value, 0, content.Length - key.Length);
 
-				// Insert new resource into databse
-				command = DBConnection.CreateCommand();
-				command.CommandText = $"INSERT INTO data (key, value) VALUES ( $key ,  $value );";
-				command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
-				command.Parameters.Add("$value", SqliteType.Blob, value.Length).Value = value;
+				DataPair updatedDataPair = new DataPair(key, value);
+				bool wasInserted = DBConnection.UpdatePair(updatedDataPair);				
 
-				int rows = command.ExecuteNonQuery();
-
-				// If no rows where affected, the update failed
-				if (rows == 0) header.ContentType = MessageType.RESOURCE_NOT_FOUND;
+				if (!wasInserted) header.ContentType = MessageType.RESOURCE_NOT_FOUND;
 				else header.ContentType = MessageType.RESOURCE_UPDATED;
 				source.SendMessage(header, null);
 
@@ -246,20 +216,11 @@ namespace P2PNetworking {
 				byte[] key = new byte[256];
 				System.Buffer.BlockCopy(content, 0, key, 0, key.Length);
 
-				// Insert new resource into databse
-				var command = DBConnection.CreateCommand();
-				command.CommandText = $"DELETE FROM data WHERE key = $key";
-				command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
+				bool wasRemoved = DBConnection.RemoveKey(key);	
 
-				int rows = command.ExecuteNonQuery();
-
-				// If no rows where affected, the resource did not exist
-				if (rows == 0)
-					header.ContentType = MessageType.RESOURCE_NOT_FOUND;
+				if (!wasRemoved) header.ContentType = MessageType.RESOURCE_NOT_FOUND;
 				else header.ContentType = MessageType.RESOURCE_DELETED; 
-
 				source.SendMessage(header, null);
-
 			
 			});
 
@@ -306,55 +267,39 @@ namespace P2PNetworking {
 			Node.WriteLine("Attempting to Connect to Known Peers");
 
 			// Read all peer entries from table
-			var command = DBConnection.CreateCommand();
-			command.CommandText = 
-			@"
-			    SELECT host, port FROM peers;
-			";
+			List<Peers> knownPeers = DBConnection.GetPeers();	
 
+			for (Peer peer in knownPeers) {
 
-			using (var reader = command.ExecuteReader()) {
-			
-				while (reader.Read()) {                        
-					var host = reader.GetString(0);
-					var port = reader.GetInt32(1);
-					Node.WriteLine($"Attempting to Connect to Peer: {host}:{port}");
-
-					try {
-
-						// Connect to new peer
-						ClientHandler handler = AddPeer(host, port);
-						Node.WriteLine($"Successful Connection to Peer: {host}:{port}");
-
-						MessageHeader header = new MessageHeader();
-						header.ProtocolVersion = Convert.ToByte(Node.Version);
-						header.ContentType = MessageType.CONNECT;
-						header.ContentLength = 0;
-						header.Forward = false;
-						header.ReferenceId = ReferenceIdCounter;
+				var host = peer.Host;
+				var port = peer.Port;
+				
+				Node.WriteLine($"Attempting to Connect to Peer: {host}:{port}");
+				
+				try {
+				
+					ClientHandler handler = AddPeer(host, port);
+					Node.WriteLine($"Successful Connection to Peer: {host}:{port}");
+					
+					MessageHeader header = new MessageHeader();
+					header.ProtocolVersion = Convert.ToByte(Node.Version);
+					header.ContentType = MessageType.CONNECT;
+					header.ContentLength = 0;
+					header.Forward = false;
+					header.ReferenceId = ReferenceIdCounter;
 	
-						handler.SendRequest(header, null, delegate(MessageReceivedArgs args) {
-							Node.WriteLine($"Response to connection request recieved: {args.Header.ContentType}");
-							return true;
-						});
-
- 					} catch (Exception e) {
-						
-						Node.WriteLine(e.ToString());
-
-						// Error connecting to new peer, remove it from peers list
-						command = DBConnection.CreateCommand();
-						command.CommandText = "DELETE FROM peers WHERE host = $host AND port = $port;";
-						command.Parameters.AddWithValue("$host", host);
-						command.Parameters.AddWithValue("$port", port);
-
-						int row = command.ExecuteNonQuery();
-						Node.WriteLine($"Removed peer {host}:{port} for failing to connect");
-					}
-
+					handler.SendRequest(header, null, delegate(MessageReceivedArgs args) {
+						Node.WriteLine($"Response to connection request recieved: {args.Header.ContentType}");
+						return true;
+					});
+					
+				} catch (Exception e) {
+					Node.WriteLine($"Failed Connection to Peer: {host}:{port}");
+					Node.WriteLien(e.ToString());
 				}
 
 			}
+
 		}
 
 		public void OnMessageReceived(object source, MessageReceivedArgs message) {
