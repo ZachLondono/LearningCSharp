@@ -21,7 +21,7 @@ namespace P2PNetworking {
 		public delegate void OnMessageTypeRecieved(ClientHandler source, MessageReceivedArgs args);
 		
 		private Dictionary<MessageType, OnMessageTypeRecieved> MessageMap;
-		private DBInterface DBConnection { get; set; }
+		private IDBInterface DBConnection { get; set; }
 		private List<ClientHandler> Connections { get; set;}
 		private readonly int Port;
 		private readonly int Backlog;
@@ -124,14 +124,14 @@ namespace P2PNetworking {
 				if (data != null) {
 					// If the record exists, add it to the response message
 					header.ContentType = MessageType.REQUEST_SUCCESSFUL;
-					header.ContentLength = data;
+					header.ContentLength = data.Length;
 				} else {
 					// If the record doesn't exist, repond with a RESOURCE_NOT_FOUND error
 					header.ContentType = MessageType.RESOURCE_NOT_FOUND;
 					header.ContentLength = 0;
 				}
 				
-				source.SendMessage(header, buffer);
+				source.SendMessage(header, data);
 
 			});
 
@@ -267,9 +267,9 @@ namespace P2PNetworking {
 			Node.WriteLine("Attempting to Connect to Known Peers");
 
 			// Read all peer entries from table
-			List<Peers> knownPeers = DBConnection.GetPeers();	
+			List<Peer> knownPeers = DBConnection.GetPeers();	
 
-			for (Peer peer in knownPeers) {
+			foreach (Peer peer in knownPeers) {
 
 				var host = peer.Host;
 				var port = peer.Port;
@@ -295,7 +295,7 @@ namespace P2PNetworking {
 					
 				} catch (Exception e) {
 					Node.WriteLine($"Failed Connection to Peer: {host}:{port}");
-					Node.WriteLien(e.ToString());
+					Node.WriteLine(e.ToString());
 				}
 
 			}
