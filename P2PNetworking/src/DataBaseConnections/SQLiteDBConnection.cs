@@ -59,7 +59,6 @@ namespace P2PNetworking {
 
 			// Inserts the key value pair, there should only be one instance of key
 			// NOTE: this is likely susceptible to duplicate keys in the case of a race condition
-
 			var command = DBConnection.CreateCommand();
 			command.CommandText = @"
 						INSERT INTO data(key, value)
@@ -71,9 +70,22 @@ namespace P2PNetworking {
 			command.Parameters.Add("$value", SqliteType.Blob, pair.Value.Length).Value = pair.Value;
 			
 			// insertion was successful if 1 row was changed
-			int rows = command.ExecuteNonQuery();
+			return command.ExecuteNonQuery() == 1;
 
-			return rows == 1;
+		}
+
+		public bool UpdatePair(DataPair pair) {
+	
+			var command = DBConnection.CreateCommand();
+			command.CommandText = @"
+						INSERT INTO data(key, value)
+						SELECT $key, $value
+						WHERE EXISTS (SELECT 1 FROM data WHERE key = $key)
+						";
+			command.Parameters.Add("$key", SqliteType.Blob, pair.Key.Length).Value = pair.Key;
+			command.Parameters.Add("$value", SqliteType.Blob, pair.Value.Length).Value = pair.Value;		
+
+			return command.ExecuteNonQuery() == 1;
 
 		}
 

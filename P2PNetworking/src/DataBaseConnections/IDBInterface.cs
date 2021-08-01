@@ -28,6 +28,7 @@ namespace P2PNetworking {
 
 		public bool ContainsKey(byte[] key);
 		public bool InsertPair(DataPair pair);
+		public bool UpdatePair(DataPair pair);
 		public byte[] SelectData(string dataCol, string conditionCol, byte[] conditionVal);
 		public bool RemoveKey(byte[] key);
 
