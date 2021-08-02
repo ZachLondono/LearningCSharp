@@ -78,9 +78,9 @@ namespace P2PNetworking {
 	
 			var command = DBConnection.CreateCommand();
 			command.CommandText = @"
-						INSERT INTO data(key, value)
-						SELECT $key, $value
-						WHERE EXISTS (SELECT 1 FROM data WHERE key = $key)
+						UPDATE data
+						SET value = $value
+						WHERE key = $key;
 						";
 			command.Parameters.Add("$key", SqliteType.Blob, pair.Key.Length).Value = pair.Key;
 			command.Parameters.Add("$value", SqliteType.Blob, pair.Value.Length).Value = pair.Value;		
