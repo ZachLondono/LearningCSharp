@@ -18,11 +18,11 @@ namespace P2PNetworking {
 		public static readonly byte Version = 1;
 		public static readonly byte MinimumSupportedVersion = 1;
 		
-		public delegate void OnMessageTypeRecieved(ClientHandler source, MessageReceivedArgs args);
+		public delegate void OnMessageTypeRecieved(IClientHandler source, MessageReceivedArgs args);
 		
 		private Dictionary<MessageType, OnMessageTypeRecieved> MessageMap;
 		private IDBInterface DBConnection { get; set; }
-		private List<ClientHandler> Connections { get; set;}
+		private List<IClientHandler> Connections { get; set;}
 		private readonly int Port;
 		private readonly int Backlog;
 
@@ -61,14 +61,14 @@ namespace P2PNetworking {
 			Node.WriteLine("Starting Node...");
 
 			// List to store connections
-			Connections = new List<ClientHandler>();
+			Connections = new List<IClientHandler>();
 
 			Node.WriteLine("Opening Connection To Database...");
 
 			// Map certain requests to specific function calls
 			MessageMap = new Dictionary<MessageType, OnMessageTypeRecieved>();
 
-			MessageMap.Add(MessageType.CONNECT, delegate(ClientHandler source, MessageReceivedArgs args) {				
+			MessageMap.Add(MessageType.CONNECT, delegate(IClientHandler source, MessageReceivedArgs args) {				
 				Node.WriteLine("Connection check message recieved");
 
 				// This is the first message that a potential peer should send when attempting to connect.
@@ -86,7 +86,7 @@ namespace P2PNetworking {
 				source.ConnectionAccepted = true;
 			});
 			
-			MessageMap.Add(MessageType.REQUEST_PEERS, delegate(ClientHandler source, MessageReceivedArgs args) {
+			MessageMap.Add(MessageType.REQUEST_PEERS, delegate(IClientHandler source, MessageReceivedArgs args) {
 				Node.WriteLine("Peers requested");
 
 				MessageHeader header = new MessageHeader();
@@ -100,7 +100,7 @@ namespace P2PNetworking {
 
 			});
 
-			MessageMap.Add(MessageType.REQUEST_RESOURCE, delegate(ClientHandler source, MessageReceivedArgs args) {
+			MessageMap.Add(MessageType.REQUEST_RESOURCE, delegate(IClientHandler source, MessageReceivedArgs args) {
 				Node.WriteLine("Resource requested");
 
 				// Start initilizing the message response header
@@ -135,7 +135,7 @@ namespace P2PNetworking {
 
 			});
 
-			MessageMap.Add(MessageType.CREATE_RESOURCE, delegate(ClientHandler source, MessageReceivedArgs args) {
+			MessageMap.Add(MessageType.CREATE_RESOURCE, delegate(IClientHandler source, MessageReceivedArgs args) {
 				Node.WriteLine("Creation requested");
 
 				MessageHeader header = new MessageHeader();
@@ -166,7 +166,7 @@ namespace P2PNetworking {
 
 			});
 
-			MessageMap.Add(MessageType.UPDATE_RESOURCE, delegate(ClientHandler source, MessageReceivedArgs args) {
+			MessageMap.Add(MessageType.UPDATE_RESOURCE, delegate(IClientHandler source, MessageReceivedArgs args) {
 				Node.WriteLine("Update requested");
 
 				MessageHeader header = new MessageHeader();
@@ -197,7 +197,7 @@ namespace P2PNetworking {
 
 			});
 
-			MessageMap.Add(MessageType.DELETE_RESOURCE, delegate(ClientHandler source, MessageReceivedArgs args) {
+			MessageMap.Add(MessageType.DELETE_RESOURCE, delegate(IClientHandler source, MessageReceivedArgs args) {
 				Node.WriteLine("Deletion requested");
 
 				MessageHeader header = new MessageHeader();
@@ -230,7 +230,7 @@ namespace P2PNetworking {
 		/// Begins listening for incoming connections
 		public void ListenForConnections() {
 			
-			if (Thread.CurrentThread.Name == null) {	
+			if (Thread.CurrentThread.Name == null) {
 				Thread.CurrentThread.Name = "ListeningThread";
 				Node.WriteLine("Renamed Listening Thread");
 			} else Node.WriteLine("Listening Node Thread already named " + Thread.CurrentThread.Name); 
@@ -278,7 +278,7 @@ namespace P2PNetworking {
 				
 				try {
 				
-					ClientHandler handler = AddPeer(host, port);
+					IClientHandler handler = AddPeer(host, port);
 					Node.WriteLine($"Successful Connection to Peer: {host}:{port}");
 					
 					MessageHeader header = new MessageHeader();
@@ -305,7 +305,7 @@ namespace P2PNetworking {
 		public void OnMessageReceived(object source, MessageReceivedArgs message) {
 
 			Node.WriteLine("Message Recieved");
-			ClientHandler sourceHandler = (ClientHandler) source;
+			IClientHandler sourceHandler = (IClientHandler) source;
 
 			if (message.Header.ContentType != MessageType.CONNECT && !sourceHandler.ConnectionAccepted) {
 				// If the peer is sending a request, prior to requesting to connect, ignore the request
@@ -328,7 +328,7 @@ namespace P2PNetworking {
 
 
 				// If message is marked to be forwarded, forward it to all connected peers
-				foreach (ClientHandler connection in Connections) {
+				foreach (IClientHandler connection in Connections) {
 					if(!sourceHandler.Equals(connection)) {
 						sourceHandler.SendMessage(message.Header, message.Content);
 					}
@@ -338,17 +338,17 @@ namespace P2PNetworking {
 
 		}
 
-		public ClientHandler AddPeer(Socket socket) {
+		public IClientHandler AddPeer(Socket socket) {
 
 			// Start thread to handle communications with this socket
-			ClientHandler handler = new ClientHandler(socket);
+			IClientHandler handler = new ClientHandler(socket);
 			// Handler called on message receive
-			handler.MessageReceived += OnMessageReceived;
+			handler.SetOnMessageRecieve(OnMessageReceived);
 			// Handler called on peer disconnect
-			handler.PeerDisconected += delegate (object o, EventArgs e) {
+			handler.SetOnPeerDisconected(delegate (object o, EventArgs e) {
 				Node.WriteLine("Removing Stale Connection");
-				Connections.Remove((ClientHandler) o);
-			};
+				Connections.Remove((IClientHandler) o);
+			});
 
 			Thread handlerThread = new Thread(new ThreadStart(handler.Run));
 			handlerThread.Start();
@@ -358,7 +358,7 @@ namespace P2PNetworking {
 			return handler;
 		}
 
-		public ClientHandler AddPeer(string host, int port) {
+		public IClientHandler AddPeer(string host, int port) {
 		
 			// Get information about the host
 			IPHostEntry ipHostInfo = Dns.GetHostEntry(host); 
@@ -381,8 +381,8 @@ namespace P2PNetworking {
 			DBConnection.InsertPeer(newPeer);
 		}
 
-		public void SendRequest(MessageHeader message, byte[] content, ClientHandler.OnReceivedResponse responseDelegate) {
-			foreach (ClientHandler peer in Connections) 
+		public void SendRequest(MessageHeader message, byte[] content, OnReceivedResponse responseDelegate) {
+			foreach (IClientHandler peer in Connections) 
 				peer.SendRequest(message, content, responseDelegate);
 		}
  

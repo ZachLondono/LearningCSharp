@@ -5,6 +5,11 @@ using System.Collections.Generic;
 
 namespace P2PNetworking {
 	
+	public delegate void MessageReceiveHandler(object source, MessageReceivedArgs args);
+
+	public delegate bool OnReceivedResponse(MessageReceivedArgs args);
+	public delegate void PeerDisconectHandler(object source, EventArgs args);
+	
 	public class MessageReceivedArgs {
  
 		public MessageHeader Header { get; }
@@ -19,22 +24,15 @@ namespace P2PNetworking {
 
 	}
 
-	class ClientHandler {
+	class ClientHandler : IClientHandler {
 	    
 		public Socket Socket { get; }
 		public DateTime StartTime { get; }
 		public bool IsAlive { get => _isAlive; }
 		public bool ConnectionAccepted { get; set; }
 
-		// Return true to unmap response from request refid/
-		public delegate bool OnReceivedResponse(MessageReceivedArgs args);
-
-		public delegate void MessageReceiveHandler(object source, MessageReceivedArgs args);
-		public event MessageReceiveHandler MessageReceived;
-
-		public delegate void PeerDisconectHandler(object source, EventArgs args);
-		public event PeerDisconectHandler PeerDisconected;
-
+		private event MessageReceiveHandler MessageReceived;
+		private event PeerDisconectHandler PeerDisconected;
 		private bool _isAlive;
 		private bool HasRecievedMessage;
 		private Dictionary<short, OnReceivedResponse> ResponseDelegateMap;
@@ -56,7 +54,6 @@ namespace P2PNetworking {
 			PendingRequests = new HashSet<short>();
 
 			ResponseDelegateMap = new Dictionary<short, OnReceivedResponse>();
-
 		}
 
 		public void Run() {
@@ -257,6 +254,14 @@ namespace P2PNetworking {
 				ResponseDelegateMap.Add(header.ReferenceId, onResponse);
 			} 
 
+		}
+
+		public void SetOnMessageRecieve(MessageReceiveHandler handler) {
+			MessageReceived += handler;
+		}
+
+		public void SetOnPeerDisconected(PeerDisconectHandler handler) {
+			PeerDisconected += handler;
 		}
 
 		/// Start recieving data with a given ReadState
