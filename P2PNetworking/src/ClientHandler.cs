@@ -3,8 +3,7 @@ using System.Threading;
 using System.Net.Sockets;
 using System.Collections.Generic;
 
-namespace P2PNetworking {
-	
+namespace P2PNetworking {	
 	public delegate void MessageReceiveHandler(object source, MessageReceivedArgs args);
 
 	public delegate bool OnReceivedResponse(MessageReceivedArgs args);
@@ -20,6 +19,14 @@ namespace P2PNetworking {
 			Header = header;
 			Content = content;
 
+		}
+
+	}
+
+	public class ClientHandlerFactory : IClientHandlerFactory {
+
+		public IClientHandler BuildClientHandler(Socket socket) {
+			return new ClientHandler(socket);		
 		}
 
 	}

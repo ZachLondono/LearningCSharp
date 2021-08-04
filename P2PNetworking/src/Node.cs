@@ -12,7 +12,8 @@ namespace P2PNetworking {
 	class Node {
 
 		public static void WriteLine (string val) {
-			Console.WriteLine($"[Thread: {Thread.CurrentThread.Name}] :: {val}");
+			// TODO: replace this with a Logger 
+			//Console.WriteLine($"[Thread: {Thread.CurrentThread.Name}] :: {val}");
 		} 
 
 		public static readonly byte Version = 1;
@@ -22,6 +23,7 @@ namespace P2PNetworking {
 		
 		private Dictionary<MessageType, OnMessageTypeRecieved> MessageMap;
 		private IDBInterface DBConnection { get; set; }
+		private IClientHandlerFactory _HandlerFactory { get; set; }
 		private List<IClientHandler> Connections { get; set;}
 		private readonly int Port;
 		private readonly int Backlog;
@@ -43,11 +45,9 @@ namespace P2PNetworking {
 
 		}
 
-		public Node() : this(11000, 10, new SQLiteDBConnection(".")) {            
-			// Start on default port
-		}
+		public Node(int port, int backlog, IDBInterface dbConnection, IClientHandlerFactory handlerFactory) {
 
-		public Node(int port, int backlog, IDBInterface dbConnection) {
+			// TODO: set maximum connections
 
 			if (Thread.CurrentThread.Name == null) {	
 				Thread.CurrentThread.Name = "MainNodeThread";
@@ -57,13 +57,12 @@ namespace P2PNetworking {
 			Port = port;
 			Backlog = backlog;
 			DBConnection = dbConnection;
+			_HandlerFactory = handlerFactory;
 
 			Node.WriteLine("Starting Node...");
 
 			// List to store connections
 			Connections = new List<IClientHandler>();
-
-			Node.WriteLine("Opening Connection To Database...");
 
 			// Map certain requests to specific function calls
 			MessageMap = new Dictionary<MessageType, OnMessageTypeRecieved>();
@@ -240,8 +239,7 @@ namespace P2PNetworking {
 			IPAddress iPAddress= ipHostInfo.AddressList[0];
 			IPEndPoint localEndPoint = new IPEndPoint(iPAddress, Port);
 
-			Socket listener  = new Socket(iPAddress.AddressFamily, SocketType.Stream, 
-			ProtocolType.Tcp);
+			Socket listener  = new Socket(iPAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
 			try {
 
@@ -253,7 +251,6 @@ namespace P2PNetworking {
 				while (true) {
 					Socket handler = listener.Accept();
 					AddPeer(handler);
-
 				}
 
 			} catch (Exception e) {
@@ -341,7 +338,7 @@ namespace P2PNetworking {
 		public IClientHandler AddPeer(Socket socket) {
 
 			// Start thread to handle communications with this socket
-			IClientHandler handler = new ClientHandler(socket);
+			IClientHandler handler = _HandlerFactory.BuildClientHandler(socket);
 			// Handler called on message receive
 			handler.SetOnMessageRecieve(OnMessageReceived);
 			// Handler called on peer disconnect
@@ -354,6 +351,8 @@ namespace P2PNetworking {
 			handlerThread.Start();
 
 			Connections.Add(handler);
+
+			Node.WriteLine($"Connection Count: {ActiveConnections}");
 
 			return handler;
 		}
