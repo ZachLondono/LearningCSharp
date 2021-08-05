@@ -1,12 +1,30 @@
-using Microsoft.Data.Sqlite;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 
 namespace P2PNetworking {
 
 	public struct DataPair {
 		public byte[] Key { get; }
 		public byte[] Value { get; }
-		
+
+		public byte[] GetEncoded() {
+			
+			// | 256-bit Hashed Key | Value |
+
+			byte[] encoded = new byte[256 + Value.Length];
+			byte[] keyDigest;
+
+			using (SHA256 sha256 = SHA256.Create()) {
+				keyDigest = sha256.ComputeHash(Key);
+			}
+
+			System.Buffer.BlockCopy(encoded, 0, keyDigest, 0, keyDigest.Length);
+			System.Buffer.BlockCopy(encoded, keyDigest.Length, Value, 0, encoded.Length - keyDigest.Length);
+			
+			return encoded;
+
+		}
+
 		public DataPair(byte[] key, byte[] value) {
 			Key = key;
 			Value = value;
