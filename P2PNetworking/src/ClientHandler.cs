@@ -42,6 +42,7 @@ namespace P2PNetworking {
 		private event PeerDisconectHandler PeerDisconected;
 		private bool _isAlive;
 		private bool HasRecievedMessage;
+		private bool _StartDisconnect;
 		private Dictionary<short, OnReceivedResponse> ResponseDelegateMap;
 		private Dictionary<short, List<MessageReceivedArgs>> ResponseMap;
 		private HashSet<short> PendingRequests;
@@ -64,7 +65,7 @@ namespace P2PNetworking {
 		}
 
 		public void Run() {
-			
+
 			if (Thread.CurrentThread.Name == null) {
 				Thread.CurrentThread.Name = "ClientThread";
 				Node.WriteLine("Renamed ClientThread");
@@ -89,6 +90,22 @@ namespace P2PNetworking {
 			// a success or failure message 
 			
 			while (true) {
+
+				if (_StartDisconnect) {
+				
+					try {
+						Socket.Shutdown(SocketShutdown.Both);
+					} finally {
+						Socket.Close();
+					}	
+
+					_isAlive = false;
+					OnPeerDisconect();
+					return;
+
+				}
+
+				
 				if (Socket.Available == 0) {
 					Thread.Sleep(500);
 				
@@ -181,6 +198,8 @@ namespace P2PNetworking {
 
 		}
 
+		
+
 		protected virtual void OnMessageReceived(MessageHeader header, byte[] content) {
 			if (MessageReceived != null)
 				MessageReceived(this, new MessageReceivedArgs(header, content));
@@ -214,6 +233,11 @@ namespace P2PNetworking {
 			return state;
 			
 		}
+		
+		public void Disconnect() {
+			_StartDisconnect = true;
+		}
+
 
 		public void SendMessage(MessageType type, byte[] content, bool forward) {
 
@@ -317,8 +341,9 @@ namespace P2PNetworking {
 			// After sending timeout response to client, wait up to 10 seconds before terminating the connection
 			// to allow the client to recieve the message
 			_isAlive = false;
-			Socket.Close(10);
-			OnPeerDisconect();
+			_StartDisconnect = true;
+
+			//OnPeerDisconect();
 		}
 
 		class ReadState {
