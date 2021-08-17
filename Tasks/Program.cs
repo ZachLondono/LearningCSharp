@@ -19,101 +19,88 @@ namespace Tasks {
 			Console.WriteLine("============================");
 			Console.WriteLine("Starting Node Test");
 			await NodeTest();
-
 			Console.WriteLine("============================");
 		}
 
 		static async Task NodeTest() {
 
-			Node nodeA = new Node(11000);			
-			var listenTask = nodeA.ListenAsync();
-		
+			Node nodeA = new Node(11000, (content) => { 
+				Console.WriteLine("Recieved From NodeA");
+				return true;
+			});			
+			
+			Node nodeB = new Node(11100, (content) => {
+				Console.WriteLine("Receveived From Node B");
+				return false;
+			});
+			Node nodeC = new Node(11110, (content) => {
+				Console.WriteLine("Receveived From Node C");
+				return false;
+			});
+			Node nodeD = new Node(11111, (content) => {
+				Console.WriteLine("Receveived From Node D");
+				return false;
+			});
 
 			IPHostEntry ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());	
 			IPAddress ipAddress = ipHostInfo.AddressList[0];
 			IPEndPoint remoteEP = new IPEndPoint(ipAddress, 11000);
 			
-			Node nodeB = new Node(11100);
+			var listenTask = nodeA.ListenAsync();
+			
 			await nodeB.ConnectAsync(remoteEP);
-			Node nodeC = new Node(11110);
 			await nodeC.ConnectAsync(remoteEP);
-			Node nodeD = new Node(11111);
 			await nodeD.ConnectAsync(remoteEP);
+			
+			// Delay to make sure all nodes are connected
+			await Task.Delay(1000);			
 
-			var sendTask = nodeA.SendAsync(new byte[]{0,0,0,0,0});
+			var sendTaskA = nodeA.SendAsync(new byte[]{0,0,0,0,0});
+			var sendTaskB = nodeB.SendAsync(new byte[]{0,0,0,0,0});
+			var sendTaskC = nodeC.SendAsync(new byte[]{0,0,0,0,0});
+			var sendTaskD = nodeD.SendAsync(new byte[]{0,0,0,0,0});
 
-			nodeA.StopReceiving();
-			nodeB.StopReceiving();
-			nodeC.StopReceiving();
-			nodeD.StopReceiving();
-			nodeA.StopListening();
-			//await listenTask;
+			await Task.Delay(2000);			
+		}
+	
+	}
 
+	class FileShareNode : Node {
+
+		private static FileShareNode _Instance = null;
+
+		public static FileShareNode GetInstance() {
+			if (_Instance == null) 	_Instance = new FileShareNode(11100);
+			return _Instance;
 		}
 
-		static async Task PeerTest() {
-			IPHostEntry ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());	
-			IPAddress ipAddress = ipHostInfo.AddressList[0];
-			IPEndPoint localEndPoint = new IPEndPoint(ipAddress, 11000);
-			IPEndPoint remoteEP = new IPEndPoint(ipAddress, 11000);
+		private FileShareNode(int port) : base(port, ProcessMessage) {
+		}
+
+		private static bool ProcessMessage(byte[] content) {
+			return false;
+		}
+
+		//private static Message ParseMessage(byte[] content) {
+		//
+		//	Converts bytes into a Message Object type
+		//
+		//}
+
+		private byte[] GetData(byte[] key) {
+
+			// Looks for a local version of the data
+			// if it is not found it will ask peers for data
+
+			return new byte[0];	
+
+		}
 		
-			Socket listener = new Socket(ipAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
-			// Start listening for connection
-			Thread t = new Thread(new ThreadStart( () => {
-					Console.WriteLine("Starting to Listen");
-					
-					listener.Bind(localEndPoint);		
-					listener.Listen(100);					
-					
-					Console.WriteLine("Waiting for a connection...");
-					
-					Socket handler = listener.Accept();
-					
-					int recieveSize = 1024;
-					byte[] buffer = new byte[recieveSize];
-					try {
-						int received = handler.Receive(buffer, 0, recieveSize, SocketFlags.None);
-						Console.WriteLine($"Received {received} bytes");
-					
+		private void StoreData(byte[] key, byte[] val) {
 
-						byte[] temp = new byte[received];
-						Array.Copy(buffer, 0, temp, 0, received);
-						handler.Send(temp, 0, temp.Length, SocketFlags.None);
-						Console.WriteLine($"Sent {temp.Length} bytes");
-
-					} catch (Exception e) {
-						Console.WriteLine("Failed to recieve");
-						Console.WriteLine(e.ToString());
-					}
-
-				}));
-		
-			t.Start();
-
-			// Send data through peer
-			Peer peer = new Peer();
-			await peer.ConnectAsync(remoteEP);			
-
-			if (peer.HasErrored) {
-				Console.WriteLine($"Failed to connect {peer.LastException.ToString()}");
-				return;
-			}
-
-			byte[] msg = Encoding.ASCII.GetBytes("Hello World");
-			peer.BeginSend(msg);
-			Console.WriteLine($"Total Bytes Sent: {peer.BytesSent}");
-			
-			/*peer.BeginReceive((content) => {
-				Console.WriteLine($"Total Bytes Recieved: {content.Length}");
-			});*/
-
-			var receiveTask = peer.ReceiveAsync();
-			var receive = await receiveTask;
-			Console.WriteLine($"Total Bytes Recieved: {receiveTask.Result.Length}");
-			
-			// Join thread, and terminate
-			t.Join();
+			// Stores data localy 
+			// Asks peers to store data
 
 		}
 
@@ -126,16 +113,14 @@ namespace Tasks {
 		private bool _receive;
 		private Socket Listener;
 		private List<Peer> _ConnectedPeers = new List<Peer>();
+		private List<Task> _ReceivingTasks = new List<Task>();
+		private Predicate<byte[]> _onReceive;
 
-
-		public Node(int port) {
-			
-			// TODO: 
-			// receive message from connected peers
+		public Node(int port, Predicate<byte[]> onReceive) {
 			Port = port;
+			_onReceive = onReceive;
 			_listen = false;
 			_receive = false;
-
 		}
 		
 		public void StopListening() {
@@ -159,27 +144,32 @@ namespace Tasks {
 		
 			await Task.Run(() => {
 				while (_listen) {
+
+					// TODO: Add pause token so that the user can pause this task
+					// https://devblogs.microsoft.com/pfxteam/cooperatively-pausing-async-methods/					
+
 					Socket handler = Listener.Accept();
 					
 					Peer peer = new Peer(handler);	
 					_ConnectedPeers.Add(peer);
-					var receivingTask = RecieveFromPeer(peer);
+					_ReceivingTasks.Add(ReceiveFromPeer(peer));
 				}
 			});
 
 		}
 
-		public async Task ConnectAsync(IPEndPoint remoteEP) {
+		public async Task<Peer> ConnectAsync(IPEndPoint remoteEP) {
 			Peer peer = new Peer();
 			await peer.ConnectAsync(remoteEP);
 
 			if (peer.HasErrored) {
 				Console.WriteLine($"Failed to connect to remote end-point {peer.LastException.ToString()}");
-				return;
+				return null;
 	 		} 
 			
 			_ConnectedPeers.Add(peer);
-			var receivingTask = RecieveFromPeer(peer);
+			_ReceivingTasks.Add(ReceiveFromPeer(peer));
+			return peer;
 		}
 
 		public async Task SendAsync(byte[] msg) {
@@ -194,11 +184,19 @@ namespace Tasks {
 			await Task.WhenAll(sendingTasks);
 		}
 
-		public async Task RecieveFromPeer(Peer peer) {
+		private async Task ReceiveFromPeer(Peer peer) {
 			_receive = true;
 			while (_receive) {
+				// TODO: Add pause token so that the user can pause this task
+				// https://devblogs.microsoft.com/pfxteam/cooperatively-pausing-async-methods/					
 				byte[] content = await peer.ReceiveAsync();
-				Console.WriteLine($"Bytes recieved {content.Length}");
+			
+				await Task.Run(async () => {
+					if (_onReceive(content)) {
+						await SendAsync(content);
+					}
+				});
+
 			}
 		}
 
