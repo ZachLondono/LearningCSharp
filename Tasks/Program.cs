@@ -30,18 +30,10 @@ namespace Tasks {
 			});			
 			
 			Node nodeB = new Node(11100, (content) => {
-				Console.WriteLine("Receveived From Node B");
+				Console.WriteLine("Receveived From NodeB");
 				return false;
 			});
-			Node nodeC = new Node(11110, (content) => {
-				Console.WriteLine("Receveived From Node C");
-				return false;
-			});
-			Node nodeD = new Node(11111, (content) => {
-				Console.WriteLine("Receveived From Node D");
-				return false;
-			});
-
+			
 			IPHostEntry ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());	
 			IPAddress ipAddress = ipHostInfo.AddressList[0];
 			IPEndPoint remoteEP = new IPEndPoint(ipAddress, 11000);
@@ -49,18 +41,17 @@ namespace Tasks {
 			var listenTask = nodeA.ListenAsync();
 			
 			await nodeB.ConnectAsync(remoteEP);
-			await nodeC.ConnectAsync(remoteEP);
-			await nodeD.ConnectAsync(remoteEP);
 			
-			// Delay to make sure all nodes are connected
+			await nodeB.SendAsync(new byte[]{1});
+			//await Task.Delay(1000);			
+			await nodeB.SendAsync(new byte[]{2});
+			//await Task.Delay(1000);			
+			await nodeB.SendAsync(new byte[]{3});
+			//await Task.Delay(1000);			
+			await nodeB.SendAsync(new byte[]{4});
 			await Task.Delay(1000);			
-
-			var sendTaskA = nodeA.SendAsync(new byte[]{0,0,0,0,0});
-			var sendTaskB = nodeB.SendAsync(new byte[]{0,0,0,0,0});
-			var sendTaskC = nodeC.SendAsync(new byte[]{0,0,0,0,0});
-			var sendTaskD = nodeD.SendAsync(new byte[]{0,0,0,0,0});
-
-			await Task.Delay(2000);			
+			await Task.Delay(1000);			
+			await Task.Delay(1000);			
 		}
 	
 	}
@@ -68,6 +59,9 @@ namespace Tasks {
 	class FileShareNode : Node {
 
 		private static FileShareNode _Instance = null;
+	
+		// A list of file keys which this node is waiting to receive
+		private List<byte[]> PendingFiles = new List<byte[]>();
 
 		public static FileShareNode GetInstance() {
 			if (_Instance == null) 	_Instance = new FileShareNode(11100);
@@ -78,6 +72,15 @@ namespace Tasks {
 		}
 
 		private static bool ProcessMessage(byte[] content) {
+
+			// Message message = ParseMessage(content);
+
+			// Check if the message is a response to a previous request
+			// 	if it is, verify the message
+			//	if the message is verified, remove the message from the list of pending files
+			//	trigger event associated with that file
+
+
 			return false;
 		}
 
@@ -88,9 +91,23 @@ namespace Tasks {
 		//}
 
 		private byte[] GetData(byte[] key) {
-
+			
 			// Looks for a local version of the data
 			// if it is not found it will ask peers for data
+		
+			// 1. Check local database for file
+
+			// 2. Add this key to the list of keys waiting to be received
+		
+			// 3. Register event to wait on for this file
+
+			// 4. Request file from peers
+
+			// 5. Create a timeout task	
+
+			// 6. Wait for event to be triggered in a task
+
+			// 7. When either the event is triggered or the timeout passes return 
 
 			return new byte[0];	
 
@@ -109,31 +126,18 @@ namespace Tasks {
 	class Node {
 	
 		public int Port { get; }
-		private bool _listen;
-		private bool _receive;
 		private Socket Listener;
-		private List<Peer> _ConnectedPeers = new List<Peer>();
+		protected List<Peer> _ConnectedPeers = new List<Peer>();
 		private List<Task> _ReceivingTasks = new List<Task>();
 		private Predicate<byte[]> _onReceive;
 
 		public Node(int port, Predicate<byte[]> onReceive) {
 			Port = port;
 			_onReceive = onReceive;
-			_listen = false;
-			_receive = false;
-		}
-		
-		public void StopListening() {
-			_listen = false;	
-		}
-		
-		public void StopReceiving() {
-			_receive = false;
 		}
 		
 		public async Task ListenAsync() {
 			
-			_listen = true;
 			IPHostEntry ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());	
 			IPAddress ipAddress = ipHostInfo.AddressList[0];
 			IPEndPoint localEndPoint = new IPEndPoint(ipAddress, Port);
@@ -143,7 +147,7 @@ namespace Tasks {
 			Listener.Listen(100);					
 		
 			await Task.Run(() => {
-				while (_listen) {
+				while (true) {
 
 					// TODO: Add pause token so that the user can pause this task
 					// https://devblogs.microsoft.com/pfxteam/cooperatively-pausing-async-methods/					
@@ -152,7 +156,8 @@ namespace Tasks {
 					
 					Peer peer = new Peer(handler);	
 					_ConnectedPeers.Add(peer);
-					_ReceivingTasks.Add(ReceiveFromPeer(peer));
+					
+					ReceiveFromPeer(peer);
 				}
 			});
 
@@ -168,36 +173,41 @@ namespace Tasks {
 	 		} 
 			
 			_ConnectedPeers.Add(peer);
-			_ReceivingTasks.Add(ReceiveFromPeer(peer));
+			//ReceiveFromPeer(peer);
 			return peer;
 		}
 
 		public async Task SendAsync(byte[] msg) {
 			List<Task> sendingTasks = new List<Task>();
 
-
-			Console.WriteLine($"Sending {msg.Length} bytes to {_ConnectedPeers.Count} peers"); 
 			_ConnectedPeers.ForEach((Peer peer) => {
 				sendingTasks.Add(peer.SendAsync(msg));
 			});
 
 			await Task.WhenAll(sendingTasks);
+			//Console.WriteLine($"Sent {msg.Length} bytes to {_ConnectedPeers.Count} peers"); 
 		}
 
-		private async Task ReceiveFromPeer(Peer peer) {
-			_receive = true;
-			while (_receive) {
-				// TODO: Add pause token so that the user can pause this task
-				// https://devblogs.microsoft.com/pfxteam/cooperatively-pausing-async-methods/					
-				byte[] content = await peer.ReceiveAsync();
-			
-				await Task.Run(async () => {
-					if (_onReceive(content)) {
-						await SendAsync(content);
-					}
-				});
+		private void ReceiveFromPeer(Peer peer) {
+			// TODO: Add pause token so that the user can pause this task
+			// https://devblogs.microsoft.com/pfxteam/cooperatively-pausing-async-methods/					
+			Task<byte[]> readTask =  peer.ReceiveAsync();
 
+			Task successTask = readTask.ContinueWith(ReadPacket, peer, TaskContinuationOptions.OnlyOnRanToCompletion);
+			successTask.ContinueWith(task => ReceiveFromPeer(peer));			
+
+			readTask.ContinueWith(ReadError, peer, TaskContinuationOptions.OnlyOnFaulted);
+		}
+
+		private void ReadPacket(Task<byte[]> readTask, object state) {
+			Peer peer = (Peer) state;
+			foreach (byte b in readTask.Result) {
+				Console.WriteLine($"Read Packet {b}");
 			}
+		}
+
+		private void ReadError(Task task, object state) {
+			Console.WriteLine($"Error Reading Packet {((Peer)state).LastException.GetType().Name}");
 		}
 
 	}
@@ -274,6 +284,7 @@ namespace Tasks {
 				} catch (Exception e) {
 					_hasErrored = true;
 					_lastException = e;
+					Console.WriteLine("Sending Exception");
 				}
 			});
 
