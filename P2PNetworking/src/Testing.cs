@@ -20,22 +20,22 @@ namespace P2PTesting {
 			var broadcast = new byte[1]{123};
 
 			Node nodeB = new Node(11000, 
-					(state) => {
+					async (state) => {
 						var result = IsEqualArr(request, state.Content) ? '✓' : 'x';
 						Console.WriteLine($"Request Received:	{result}");
-						state.Respond(response);
+						await state.Respond(response);
 						return false;
-					},(state) => {
+					},async (state) => {
 						var result = IsEqualArr(broadcast, state.Content) ? '✓' : 'x';
 						Console.WriteLine($"Request Received:	{result}");
-						return false;
+						return await Task<bool>.Run(()=>false);
 					});
 
 			Node nodeA = new Node(10101, 
-					(state) => {
-						return false;
-					},(state) => {
-						return false;
+					async (state) => {
+						return await Task<bool>.Run(()=>false);
+					},async (state) => {
+						return await Task<bool>.Run(()=>false);
 					});
 
 

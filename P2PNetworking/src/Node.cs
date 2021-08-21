@@ -64,10 +64,10 @@ namespace P2PNetworking {
 		protected List<Peer> _ConnectedPeers = new List<Peer>();
 		private List<Task> _ReceivingTasks = new List<Task>();
 		private Dictionary<int, TaskCompletionSource<byte[]>> _PendingRequests = new Dictionary<int, TaskCompletionSource<byte[]>>();
-		private Predicate<ReceiveState> _onReceiveRequest;
-		private Predicate<ReceiveState> _onReceiveBroadcast;
+		private Func<ReceiveState,Task<bool>> _onReceiveRequest;
+		private Func<ReceiveState,Task<bool>> _onReceiveBroadcast;
 
-		public Node(int port, Predicate<ReceiveState> onReceiveRequest, Predicate<ReceiveState> onReceiveBroadcast) {
+		public Node(int port, Func<ReceiveState,Task<bool>> onReceiveRequest, Func<ReceiveState,Task<bool>> onReceiveBroadcast) {
 			Port = port;
 			_onReceiveRequest = onReceiveRequest;
 			_onReceiveBroadcast = onReceiveBroadcast;
@@ -207,19 +207,15 @@ namespace P2PNetworking {
 			bool alreadyReceived = false;
 			if (!alreadyReceived) { 
 				
-				bool fwd = await Task.Run<bool>(() => {
+				bool fwd = false;
 					
-					var receiveState = new ReceiveState(msg, peer, header.Id);
-					
-					if (header.Type == MessageType.Request) {
-						return _onReceiveRequest(receiveState);
-					} else if (header.Type == MessageType.Broadcast) {
-						return _onReceiveBroadcast(receiveState);
-					}
-
-					return false;
-
-				});
+				var receiveState = new ReceiveState(msg, peer, header.Id);
+				
+				if (header.Type == MessageType.Request) {
+					fwd = await _onReceiveRequest(receiveState);
+				} else if (header.Type == MessageType.Broadcast) {
+					fwd = await _onReceiveBroadcast(receiveState);
+				}
 
 				// Forward to other peers
 				if (fwd) {

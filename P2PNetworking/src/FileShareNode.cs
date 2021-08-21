@@ -17,7 +17,7 @@ namespace P2PNetworking {
 
 		}
 
-		private bool onReceiveRequest(Node.ReceiveState state) {
+		private async Task<bool> onReceiveRequest(Node.ReceiveState state) {
 
 			byte[] requestData = state.Content;
 			(MessageHeader header, byte[] msg) request = GetMessage(requestData);
@@ -28,10 +28,10 @@ namespace P2PNetworking {
 
 				if (data == null) {
 					byte[] response = MessageToBytes(MessageType.RESOURCE_NOT_FOUND, new byte[]{});
-					state.Respond(response);
+					await state.Respond(response);
 				} else {
 					byte[] response = MessageToBytes(MessageType.REQUEST_SUCCESSFUL, data);
-					state.Respond(response);
+					await state.Respond(response);
 				}
 
 			}
@@ -39,7 +39,7 @@ namespace P2PNetworking {
 			return false;
 		}
 
-		private bool onReceiveBroadcast(Node.ReceiveState state) {
+		private async Task<bool> onReceiveBroadcast(Node.ReceiveState state) {
 
 			/* 
 				Broadcast Examples:
@@ -55,7 +55,7 @@ namespace P2PNetworking {
 				using (SHA256 sha = SHA256.Create()) {
 					byte[] hash = sha.ComputeHash(broadcast.msg);
 					DataPair data = new DataPair(hash, broadcast.msg);
-					_dbInterface.InsertPair(data);
+					await _dbInterface.InsertPair(data);
 				}
 			}
 
