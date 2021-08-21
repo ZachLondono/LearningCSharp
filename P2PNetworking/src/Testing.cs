@@ -2,19 +2,32 @@ using System;
 using P2PNetworking;
 using System.Threading.Tasks;
 using System.Net;
+using System.Text;
+using System.Security.Cryptography;
 
 namespace P2PTesting { 
 
 	public class Testing {
 
 		static async Task Main(string[] args) {
+			await TestSuite(args);
+		}
+
+		static async Task NodeTest1() {
+
+			var request = new byte[1]{222};
+			var response = new byte[1]{111};
+			var broadcast = new byte[1]{123};
 
 			Node nodeB = new Node(11000, 
 					(state) => {
-						Console.WriteLine("Request Received");
-						state.Respond(new byte[]{123});
+						var result = IsEqualArr(request, state.Content) ? '✓' : 'x';
+						Console.WriteLine($"Request Received:	{result}");
+						state.Respond(response);
 						return false;
 					},(state) => {
+						var result = IsEqualArr(broadcast, state.Content) ? '✓' : 'x';
+						Console.WriteLine($"Request Received:	{result}");
 						return false;
 					});
 
@@ -34,52 +47,46 @@ namespace P2PTesting {
 
 			await nodeA.ConnectAsync(remoteEP);
 
-			byte[] response = await nodeA.RequestAsync(new byte[]{222});
+			byte[] responseReceived = await nodeA.RequestAsync(request);
+			await nodeA.BroadcastAsync(broadcast);
 
-			Console.WriteLine($"Response Received {response[0]}");
+			var result = IsEqualArr(response, responseReceived) ? '✓' : 'x';
+			Console.WriteLine($"Response Received:	{result}");
 
 		}
 
-	}
-/*
-		static void NodeTest1(string[] args) {
-			if (args.Length > 0) {
-				Node node = new Node(11111, 10, new SQLiteDBConnection("."), new ClientHandlerFactory());
+		static async Task FileShareTest() {
 
-				Thread t = new Thread(() =>{
-					node.ListenForConnections();
-				});
+			IDBInterface dbConnection = new SQLiteDBConnection(".");
+			FileShareNode fsnA = new FileShareNode(11111, dbConnection);
+			FileShareNode fsnB = new FileShareNode(22222, dbConnection);
 
-				t.Start();
+			IPHostEntry ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());	
+			IPAddress ipAddress = ipHostInfo.AddressList[0];
+			IPEndPoint remoteEP = new IPEndPoint(ipAddress, 11111);
 
-				byte[] key = Encoding.ASCII.GetBytes("Hello");
-				byte[] content = Encoding.ASCII.GetBytes("World");
+			await fsnB.ConnectAsync(remoteEP);
 
-				byte[] data = new DataPair(key, content).GetEncoded();
+			byte[] data = new byte[]{0,1,2,3,4,5,6};
 
-				Thread.Sleep(5000);
+			await fsnA.StoreFileOnNetwork(data);
 
-				MessageHeader header = new MessageHeader();
-				header.ContentType = MessageType.CREATE_RESOURCE;
-				header.Forward = false;
-				header.ProtocolVersion = Node.Version;
-				header.ReferenceId = 0;
-				header.ContentLength = data.Length;
 
-				node.SendRequest(header, data, (args) => {
-					Console.WriteLine($"Recieved {args.Header.ContentType}");
-					return false;
-				});
-		
+			using (SHA256 sha = SHA256.Create()) {
+				byte[] hash = sha.ComputeHash(data);
+				var result = dbConnection.ContainsKey(hash) ? '✓' : 'x';
+				Console.WriteLine($"Data Stored:	{result}");			
 				
-			} else {	
-				Node node = new Node(33333, 10, new SQLiteDBConnection("."), new ClientHandlerFactory());
-				node.ConnectToPeers();
+				byte[] received = await fsnA.GetFileOnNetwork(hash);
+				result = IsEqualArr(received, data) ? '✓' : 'x';
+				Console.WriteLine($"Data Received:	{result}");			
 			}
+
+
 		}
 
-		static void TestSuite(string[] args) {               
 
+		static async Task TestSuite(string[] args) {
 			IDBInterface dbConnection = new SQLiteDBConnection(".");
 
 			byte[] testKey = Encoding.ASCII.GetBytes("Hello");
@@ -145,9 +152,9 @@ namespace P2PTesting {
 			string host2 = "Hello2";
 			int port2 = 111112;			
 			
-			Peer peer = new Peer(host, port);
-			Peer peer2 = new Peer(host, port2);
-			Peer peer3 = new Peer(host2, port);
+			PeerInfo peer = new PeerInfo(host, port);
+			PeerInfo peer2 = new PeerInfo(host, port2);
+			PeerInfo peer3 = new PeerInfo(host2, port);
 			
 			System.Console.WriteLine("=================================");
 			System.Console.WriteLine("Testing peer table commands");
@@ -193,178 +200,28 @@ namespace P2PTesting {
 			System.Console.WriteLine("=================================");
 			System.Console.WriteLine("Testing Nodes");
 			
-			var handlerFactory = new ClientHandlerFactory();
-			var node = new Node(11000, 4, dbConnection, handlerFactory);
+			await NodeTest1();
+			System.Console.WriteLine("=================================");
 			
-			dbConnection.InsertPeer(new Peer("DESKTOP-QFS6RF2", 11111));
-			dbConnection.InsertPeer(new Peer("DESKTOP-QFS6RF2", 22222));
-			
-			// Testing outgoing connections
-			Thread outgoing = new Thread(new ThreadStart(Listen));
-			outgoing.Start();
-
-			Thread creation = new Thread(new ThreadStart(StoreData));
-			creation.Start();
-			
-			// Need to add ability to connect to a specific peer
-			node.ConnectToPeers();
-			
-			result = node.ActiveConnections == 2 ? '✓' : 'x';
-			Console.WriteLine($"Outgoing Connections: {result}");
-			outgoing.Join();
-			creation.Join();
-
-			Console.WriteLine("Hello?");
-
+			System.Console.WriteLine("=================================");
+			System.Console.WriteLine("Testing File Share Nodes");
+			await FileShareTest();
+			System.Console.WriteLine("=================================");
 			// Check that node sends starting connection request
 
 		}
 
-		private static IClientHandler CreateHandler(int port) {
-			IPHostEntry ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());
-			IPAddress addy = ipHostInfo.AddressList[0];
-			IPEndPoint localEp = new IPEndPoint(addy, port);
-			
-			Socket socket = new Socket(addy.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-			socket.Bind(localEp);
-			socket.Listen(1);
-			
-			Socket handlerS = socket.Accept();
-			var handler = new ClientHandlerFactory().BuildClientHandler(handlerS);
-			return handler;
-		}
+		public static bool IsEqualArr(byte[] arr1, byte[] arr2) {
 
-		private static void Listen() {
-			
-			IClientHandler handler = CreateHandler(11111);
+			if (arr1.Length != arr2.Length) return false;
 
-			handler.SetOnMessageRecieve((source, args) => {
-				var result = args.Header.ContentType == MessageType.CONNECT ? '✓' : 'x';
-				Console.WriteLine($"Connection Request On Connect: {result}");
-				((ClientHandler)source).Disconnect();
-			});
-
-			handler.Run();
-		
-		}
-
-		private static void StoreData() {
-			
-			IClientHandler handler = CreateHandler(22222);
-
-			byte[] key = Encoding.ASCII.GetBytes("Hello");
-			byte[] content = Encoding.ASCII.GetBytes("World");
-
-			byte[] data = new DataPair(key, content).GetEncoded();
-
-			MessageHeader header = new MessageHeader();
-			header.ContentType = MessageType.CREATE_RESOURCE;
-			header.Forward = false;
-			header.ProtocolVersion = Node.Version;
-			header.ReferenceId = 0;
-			header.ContentLength = data.Length;
-
-			handler.SetOnMessageRecieve((source, args) => {						
-
-				if (args.Header.ContentType == MessageType.CONNECT) {
-
-					MessageHeader connHeader = new MessageHeader();
-					connHeader.ProtocolVersion = Convert.ToByte(Node.Version);
-					connHeader.ContentType = MessageType.REQUEST_SUCCESSFUL;
-					connHeader.ContentLength = 0;
-					connHeader.Forward = false;
-					connHeader.ReferenceId = args.Header.ReferenceId;
-
-					((ClientHandler)source).SendMessage(connHeader, null);
-					((ClientHandler)source).ConnectionAccepted = true;
-
-					Thread.Sleep(1000);
-					((ClientHandler)source).SendMessage(header, data);
-				} else {
-					var result = args.Header.ContentType == MessageType.RESOURCE_CREATED ? '✓' : 'x';
-					Console.WriteLine($"Resource Creation: {result}");
-					((ClientHandler)source).Disconnect();
-				}
-
-
-			});
-
-			handler.Run();
-
-		}
-
-		private static void ConnectToNode() {
-			IPHostEntry ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());
-			IPAddress addy = ipHostInfo.AddressList[0];
-			IPEndPoint remoteEp = new IPEndPoint(addy, 11000);
-			Socket socket = new Socket(addy.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-			socket.Connect(remoteEp);
-			// Give enought time for node thread to make connection
-			Thread.Sleep(500);
-		}
-
-		private static void printByteArr(byte[] arr) {
-			
-			for (int i = 0; i < arr.Length; i++ ) {
-				Console.Write(arr[i] + " ");				
-			}
-			Console.WriteLine();
-
-		}
-
-		private static bool IsEqualArr(byte[] a, byte[] b) {
-
-			if (a.Length != b.Length) return false;
-
-			for (int i = 0; i < a.Length; i++) {
-				
-				if (a[i] != b[i]) {
-					return false;
-				}
-
+			for (int i = 0; i < arr1.Length; i++) {
+				if (arr1[i] != arr2[i]) return false;
 			}
 
 			return true;
 
 		}
 
-		public class TestHandlerFactory : IClientHandlerFactory {
-			public IClientHandler BuildClientHandler(Socket socket) {
-				IClientHandler handler = new TestHandler();
-				return handler;
-			}
-		}
-
-		public class TestHandler : IClientHandler {
-			public bool ConnectionAccepted { get; set; }
-			public void Disconnect() {
-
-			}
-
-			public void SendMessage(MessageHeader header, byte[] content) {
-				
-				if (content == null) content = new byte[0];
-				Console.WriteLine("---- Sending Message ----");
-				Console.WriteLine($"type:{header.ContentType} fwd:{header.Forward} len:{content.Length} ver:{header.ProtocolVersion} ref:{header.ReferenceId}");
-				Console.WriteLine("-------------------------");
-			}
-
-			public void SendRequest(MessageHeader header, byte[] content, OnReceivedResponse onResponse) {
-				Console.WriteLine("---- Sending Request ----");
-				Console.WriteLine($"type:{header.ContentType} fwd:{header.Forward} len:{content.Length} ver:{header.ProtocolVersion} ref:{header.ReferenceId}");
-				Console.WriteLine("-------------------------");
-			}
-
-			public void SetOnMessageRecieve(MessageReceiveHandler handler) {
-			}
-
-			public void SetOnPeerDisconected(PeerDisconectHandler handler) {
-			}
-
-			public void Run() {
-			}
-
-		}
-	}*/
-
+	}
 }
