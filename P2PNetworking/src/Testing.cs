@@ -57,7 +57,7 @@ namespace P2PTesting {
 
 		static async Task FileShareTest() {
 
-			IDBInterface dbConnection = new SQLiteDBConnection(".");
+			IDBInterface dbConnection = new SQLiteDBConnection("./FileShareTest/");
 			FileShareNode fsnA = new FileShareNode(11111, dbConnection);
 			FileShareNode fsnB = new FileShareNode(22222, dbConnection);
 
@@ -67,10 +67,9 @@ namespace P2PTesting {
 
 			await fsnB.ConnectAsync(remoteEP);
 
-			byte[] data = new byte[]{0,1,2,3,4,5,6};
+			byte[] data = Encoding.ASCII.GetBytes("Hello World");
 
 			await fsnA.StoreFileOnNetwork(data);
-
 
 			using (SHA256 sha = SHA256.Create()) {
 				byte[] hash = sha.ComputeHash(data);
@@ -87,7 +86,7 @@ namespace P2PTesting {
 
 
 		static async Task TestSuite(string[] args) {
-			IDBInterface dbConnection = new SQLiteDBConnection(".");
+			IDBInterface dbConnection = new SQLiteDBConnection("./DBTest/");
 
 			byte[] testKey = Encoding.ASCII.GetBytes("Hello");
 			byte[] testValue = Encoding.ASCII.GetBytes("World");
