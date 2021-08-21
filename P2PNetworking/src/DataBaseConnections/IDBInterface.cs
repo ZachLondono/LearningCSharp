@@ -18,8 +18,8 @@ namespace P2PNetworking {
 				keyDigest = sha256.ComputeHash(Key);
 			}
 
-			System.Buffer.BlockCopy(encoded, 0, keyDigest, 0, keyDigest.Length);
-			System.Buffer.BlockCopy(encoded, keyDigest.Length, Value, 0, encoded.Length - keyDigest.Length);
+			System.Buffer.BlockCopy(keyDigest, 0, encoded, 0, keyDigest.Length);
+			System.Buffer.BlockCopy(Value, 0, encoded, keyDigest.Length, Value.Length);
 			
 			return encoded;
 
@@ -31,11 +31,11 @@ namespace P2PNetworking {
 		}
 	}
 
-	public struct Peer {
+	public struct PeerInfo {
 		public string Host { get; }
 		public int Port { get; }
 
-		public Peer(string host, int port) {
+		public PeerInfo(string host, int port) {
 			Host = host;
 			Port = port;
 		}
@@ -50,10 +50,10 @@ namespace P2PNetworking {
 		public byte[] SelectData(string dataCol, string conditionCol, byte[] conditionVal);
 		public bool RemoveKey(byte[] key);
 
-		public List<Peer> GetPeers(); 
-		public bool InsertPeer(Peer newPeer); 
-		public bool RemovePeer(Peer peer);
-		public bool ContainsPeer(Peer peer);
+		public List<PeerInfo> GetPeers(); 
+		public bool InsertPeer(PeerInfo newPeer); 
+		public bool RemovePeer(PeerInfo peer);
+		public bool ContainsPeer(PeerInfo peer);
 		// public void BlackListPeer(Peer badPeer) { } 
 
 	}

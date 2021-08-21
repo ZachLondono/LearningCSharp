@@ -113,9 +113,9 @@ namespace P2PNetworking {
 		
 		}	
 
-		public List<Peer> GetPeers() {
+		public List<PeerInfo> GetPeers() {
 			
-			List<Peer> peers = new List<Peer>(); 
+			List<PeerInfo> peers = new List<PeerInfo>(); 
 
 			var command = DBConnection.CreateCommand();
 			command.CommandText = "SELECT host, port FROM peers;";
@@ -124,7 +124,7 @@ namespace P2PNetworking {
 				while (reader.Read()) {
 					var host = reader.GetString(0);
 					var port = reader.GetInt32(1);
-					Peer peer = new Peer(host, port);
+					PeerInfo peer = new PeerInfo(host, port);
 					peers.Add(peer);
 				}
 			}
@@ -133,7 +133,7 @@ namespace P2PNetworking {
 
 		}
 
-		public bool InsertPeer(Peer newPeer) {
+		public bool InsertPeer(PeerInfo newPeer) {
 
 			var command = DBConnection.CreateCommand();
 			command.CommandText = @"
@@ -148,7 +148,7 @@ namespace P2PNetworking {
 			return 1 == rows;
 		}
 
-		public bool RemovePeer(Peer peer) {
+		public bool RemovePeer(PeerInfo peer) {
 
 			var command = DBConnection.CreateCommand();
 			command.CommandText = "DELETE FROM peers WHERE host = $host AND port = $port;";
@@ -159,7 +159,7 @@ namespace P2PNetworking {
 
 		}
 
-		public bool ContainsPeer(Peer peer) {
+		public bool ContainsPeer(PeerInfo peer) {
 			
 			var command = DBConnection.CreateCommand();
 			command.CommandText = "SELECT * FROM peers WHERE host = $host AND port = $port";
