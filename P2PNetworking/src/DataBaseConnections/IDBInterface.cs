@@ -44,6 +44,8 @@ namespace P2PNetworking {
 
 	public interface IDBInterface {
 
+		public void Close();
+
 		public bool ContainsKey(byte[] key);
 		public bool InsertPair(DataPair pair);
 		public bool UpdatePair(DataPair pair);

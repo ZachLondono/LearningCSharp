@@ -81,6 +81,8 @@ namespace P2PTesting {
 				Console.WriteLine($"Data Received:	{result}");			
 			}
 
+			fsnA.Dispose();
+			fsnB.Dispose();
 
 		}
 
@@ -194,11 +196,13 @@ namespace P2PTesting {
 			// Check if data contains key, after removing it
 			result = dbConnection.ContainsPeer(peer) == false ? '✓' : 'x';
 			Console.WriteLine($"Check for peer1 after delete:\t{result}");
+
+			Console.WriteLine("Closing DB Connection");
+			dbConnection.Close();
 			System.Console.WriteLine("=================================");
 		
 			System.Console.WriteLine("=================================");
 			System.Console.WriteLine("Testing Nodes");
-			
 			await NodeTest1();
 			System.Console.WriteLine("=================================");
 			
@@ -206,7 +210,6 @@ namespace P2PTesting {
 			System.Console.WriteLine("Testing File Share Nodes");
 			await FileShareTest();
 			System.Console.WriteLine("=================================");
-			// Check that node sends starting connection request
 
 		}
 

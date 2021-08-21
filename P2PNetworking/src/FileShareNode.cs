@@ -5,7 +5,7 @@ using System.Security.Cryptography;
 
 namespace P2PNetworking {
 
-	public class FileShareNode {
+	public class FileShareNode : IDisposable {
 		public const int PROTOCOL_VERSION = 1;
 		private Node node;
 		private IDBInterface _dbInterface;
@@ -50,15 +50,13 @@ namespace P2PNetworking {
 
 			byte[] broadcastData = state.Content;
 			(MessageHeader header, byte[] msg) broadcast = GetMessage(broadcastData);
-			
-			if (broadcast.header.MessageType == MessageType.CREATE_RESOURCE) {
 
+			if (broadcast.header.MessageType == MessageType.CREATE_RESOURCE) {
 				using (SHA256 sha = SHA256.Create()) {
 					byte[] hash = sha.ComputeHash(broadcast.msg);
 					DataPair data = new DataPair(hash, broadcast.msg);
 					_dbInterface.InsertPair(data);
 				}
-
 			}
 
 			return false;
@@ -108,6 +106,10 @@ namespace P2PNetworking {
 			Node.FromBytes<MessageHeader>(headerBytes, out header);
 
 			return  (header, msg);
+		}
+
+		public void Dispose() {
+			_dbInterface.Close();
 		}
 
 	}

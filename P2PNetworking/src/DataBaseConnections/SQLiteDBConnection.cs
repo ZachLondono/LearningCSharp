@@ -174,5 +174,9 @@ namespace P2PNetworking {
 
 		// public void BlackListPeer(Peer badPeer) { } 
 
+		public void Close() {
+			DBConnection.Close();
+		}
+
 	}
 }
