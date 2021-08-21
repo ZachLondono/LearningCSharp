@@ -20,7 +20,7 @@ namespace P2PNetworking {
 				this.requestId = requestId;
 			}
 			
-			public async void Respond (byte[] response) {
+			public async Task Respond (byte[] response) {
 
 				ResponseHeader responseHeader = new ResponseHeader(requestId, response.Length);
 
