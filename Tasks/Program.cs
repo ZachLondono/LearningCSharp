@@ -5,53 +5,54 @@ using System.Net.Sockets;
 using System.Net;
 using System.Text;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 
 namespace Tasks {
 	
 	class Program {
 		
 		static async Task Main(string[] args) {
-
-			//Console.WriteLine("============================");
-			//Console.WriteLine("Starting Peer Test");
-			//await PeerTest();
-	
 			Console.WriteLine("============================");
 			Console.WriteLine("Starting Node Test");
-			await NodeTest();
+			await NodeTest(args.Length > 0);
 			Console.WriteLine("============================");
 		}
 
-		static async Task NodeTest() {
-
-			Node nodeA = new Node(11000, (content) => { 
-				Console.WriteLine("Recieved From NodeA");
-				return true;
+		static async Task NodeTest(bool A) {
+			
+			// TODO : do not give direct access to peer, instead give a mechanism to respond
+			Node nodeA = new Node(11000, (State) => { 
+				Console.WriteLine($"A: Request Received: {State.Content}");
+				State.Respond(new byte[]{123});
+				return false;
+			}, (State) => {
+				Console.WriteLine($"A: Broadcast Received: {State.Content}");
+				return false;
 			});			
 			
-			Node nodeB = new Node(11100, (content) => {
-				Console.WriteLine("Receveived From NodeB");
+			/*Node nodeB = new Node(11100, (State) => {
+				Console.WriteLine($"B: Request Received: {State.Content}");
 				return false;
-			});
+			}, (State) => {	
+				Console.WriteLine($"B: Broadcast Received: {State.Content}");
+				return false;
+			});*/
 			
 			IPHostEntry ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());	
 			IPAddress ipAddress = ipHostInfo.AddressList[0];
 			IPEndPoint remoteEP = new IPEndPoint(ipAddress, 11000);
-			
-			var listenTask = nodeA.ListenAsync();
-			
-			await nodeB.ConnectAsync(remoteEP);
-			
-			await nodeB.SendAsync(new byte[]{1});
-			//await Task.Delay(1000);			
-			await nodeB.SendAsync(new byte[]{2});
-			//await Task.Delay(1000);			
-			await nodeB.SendAsync(new byte[]{3});
-			//await Task.Delay(1000);			
-			await nodeB.SendAsync(new byte[]{4});
-			await Task.Delay(1000);			
-			await Task.Delay(1000);			
-			await Task.Delay(1000);			
+
+			if (A) {		
+				var listenTask = nodeA.ListenAsync();
+				while (true) {}
+			} else {
+				await nodeA.ConnectAsync(remoteEP);
+				byte[] response = await nodeA.RequestAsync(new byte[]{1});
+				if (response != null)
+					Console.WriteLine($"Response: {response[0]}");
+				else Console.WriteLine("null");
+			}
+
 		}
 	
 	}
@@ -68,72 +69,134 @@ namespace Tasks {
 			return _Instance;
 		}
 
-		private FileShareNode(int port) : base(port, ProcessMessage) {
+		private FileShareNode(int port) : base(port, ProcessMessage, ProcessMessage) {
 		}
 
-		private static bool ProcessMessage(byte[] content) {
-
-			// Message message = ParseMessage(content);
-
-			// Check if the message is a response to a previous request
-			// 	if it is, verify the message
-			//	if the message is verified, remove the message from the list of pending files
-			//	trigger event associated with that file
-
-
+		private static bool ProcessMessage(ReceiveState content) {
+			Console.WriteLine("Message Received");
 			return false;
 		}
-
-		//private static Message ParseMessage(byte[] content) {
-		//
-		//	Converts bytes into a Message Object type
-		//
-		//}
-
+	
 		private byte[] GetData(byte[] key) {
-			
-			// Looks for a local version of the data
-			// if it is not found it will ask peers for data
-		
-			// 1. Check local database for file
-
-			// 2. Add this key to the list of keys waiting to be received
-		
-			// 3. Register event to wait on for this file
-
-			// 4. Request file from peers
-
-			// 5. Create a timeout task	
-
-			// 6. Wait for event to be triggered in a task
-
-			// 7. When either the event is triggered or the timeout passes return 
-
-			return new byte[0];	
-
+			return new byte[] {};
 		}
-		
 
 		private void StoreData(byte[] key, byte[] val) {
-
-			// Stores data localy 
-			// Asks peers to store data
-
 		}
 
 	}
 
+	
+
 	class Node {
+	
+		public struct ReceiveState {
+			public byte[] Content { get; } 
+			private Peer peer;
+			private int requestId;
+			public ReceiveState(byte[] received, Peer receivedFrom, int requestId) {
+				Content = received;
+				peer = receivedFrom;
+				this.requestId = requestId;
+			}
+			
+			public async void Respond (byte[] response) {
+
+				ResponseHeader responseHeader = new ResponseHeader(requestId, response.Length);
+
+				MessageHeader messageHeader = new MessageHeader(new Random().Next(), MessageType.Response, Marshal.SizeOf(responseHeader) + response.Length);
+				
+				await peer.SendAsync(MessageHeader.GetBytes(messageHeader));
+				await peer.SendAsync(ResponseHeader.GetBytes(responseHeader));
+				await peer.SendAsync(response);
+			}
+
+		}
+		
+		public enum MessageType : byte{
+			Broadcast = 2,
+			Request = 1,
+			Response = 0
+		}
+		
+		public struct MessageHeader {
+			public int Id { get; }
+			public MessageType Type { get; }
+			public int MsgLen { get; }
+			public MessageHeader(int id, MessageType type, int len) {
+				Id = id;
+				Type = type;
+				MsgLen = len;
+			}
+
+			public static byte[] GetBytes(MessageHeader header) {
+				int size = Marshal.SizeOf(header);
+				byte[] arr = new byte[size];
+
+				IntPtr ptr = Marshal.AllocHGlobal(size);
+				Marshal.StructureToPtr(header, ptr, true);
+				Marshal.Copy(ptr, arr, 0, size);
+				Marshal.FreeHGlobal(ptr);
+				return arr;
+			}
+
+			public static MessageHeader FromBytes(byte[] bytes) {
+				MessageHeader header = new MessageHeader();
+				int size = Marshal.SizeOf(header);
+				IntPtr ptr = Marshal.AllocHGlobal(size);
+				Marshal.Copy(bytes, 0, ptr, size);
+				header = (MessageHeader) Marshal.PtrToStructure(ptr, header.GetType());
+				Marshal.FreeHGlobal(ptr);
+
+				return header;
+			}
+
+		}
+
+		public struct ResponseHeader {
+			public int RefId { get; }
+			public int Length { get; }
+
+			public ResponseHeader(int refId, int length) {
+				RefId = refId;
+				Length = length;
+			}
+
+			public static byte[] GetBytes(ResponseHeader header) {
+				int size = Marshal.SizeOf(header);
+				byte[] arr = new byte[size];
+
+				IntPtr ptr = Marshal.AllocHGlobal(size);
+				Marshal.StructureToPtr(header, ptr, true);
+				Marshal.Copy(ptr, arr, 0, size);
+				Marshal.FreeHGlobal(ptr);
+				return arr;
+			}
+
+			public static ResponseHeader FromBytes(byte[] bytes) {
+				ResponseHeader header = new ResponseHeader();
+				int size = Marshal.SizeOf(header);
+				IntPtr ptr = Marshal.AllocHGlobal(size);
+				Marshal.Copy(bytes, 0, ptr, size);
+				header = (ResponseHeader) Marshal.PtrToStructure(ptr, header.GetType());
+				Marshal.FreeHGlobal(ptr);
+
+				return header;
+			}
+		}
 	
 		public int Port { get; }
 		private Socket Listener;
 		protected List<Peer> _ConnectedPeers = new List<Peer>();
 		private List<Task> _ReceivingTasks = new List<Task>();
-		private Predicate<byte[]> _onReceive;
+		private Dictionary<int, TaskCompletionSource<byte[]>> _PendingRequests = new Dictionary<int, TaskCompletionSource<byte[]>>();
+		private Predicate<ReceiveState> _onReceiveRequest;
+		private Predicate<ReceiveState> _onReceiveBroadcast;
 
-		public Node(int port, Predicate<byte[]> onReceive) {
+		public Node(int port, Predicate<ReceiveState> onReceiveRequest, Predicate<ReceiveState> onReceiveBroadcast) {
 			Port = port;
-			_onReceive = onReceive;
+			_onReceiveRequest = onReceiveRequest;
+			_onReceiveBroadcast = onReceiveBroadcast;
 		}
 		
 		public async Task ListenAsync() {
@@ -173,41 +236,125 @@ namespace Tasks {
 	 		} 
 			
 			_ConnectedPeers.Add(peer);
-			//ReceiveFromPeer(peer);
+			ReceiveFromPeer(peer);
 			return peer;
 		}
 
-		public async Task SendAsync(byte[] msg) {
+		private async Task SendAsync(MessageHeader header, byte[] msg) {
 			List<Task> sendingTasks = new List<Task>();
 
+			var headerBytes = MessageHeader.GetBytes(header);
+			
 			_ConnectedPeers.ForEach((Peer peer) => {
-				sendingTasks.Add(peer.SendAsync(msg));
+				// Send header and then msg content			
+				Task sendingTask = peer.SendAsync(headerBytes);
+				sendingTask.ContinueWith(task => peer.SendAsync(msg),
+							TaskContinuationOptions.OnlyOnRanToCompletion);
+				
+				sendingTasks.Add(sendingTask);
 			});
-
+	
 			await Task.WhenAll(sendingTasks);
-			//Console.WriteLine($"Sent {msg.Length} bytes to {_ConnectedPeers.Count} peers"); 
+		}
+	
+		public async Task BroadcastAsync(byte[] msg) {
+			MessageHeader header = new MessageHeader(new Random().Next(), MessageType.Broadcast, msg.Length);
+			await SendAsync(header, msg);
+		}
+
+		public async Task<byte[]> RequestAsync(byte[] msg) {
+			// Sends a request and returns a response
+			CancellationTokenSource source = new CancellationTokenSource();
+			CancellationToken token = source.Token;
+
+			MessageHeader header = new MessageHeader(new Random().Next(), MessageType.Request, msg.Length);
+			var headerBytes = MessageHeader.GetBytes(header);
+
+			TaskCompletionSource<byte[]> requestCompleteSource = new TaskCompletionSource<byte[]>();
+			_PendingRequests.Add(header.Id, requestCompleteSource);
+
+			_ConnectedPeers.ForEach ((peer) => {
+				// TODO: this task should time out
+				Task requestTask = peer.SendAsync(headerBytes);
+				requestTask.ContinueWith(task => peer.SendAsync(msg),
+							TaskContinuationOptions.OnlyOnRanToCompletion);
+			});
+			
+			byte[] response =  await requestCompleteSource.Task;
+
+			return response;	
+
 		}
 
 		private void ReceiveFromPeer(Peer peer) {
 			// TODO: Add pause token so that the user can pause this task
 			// https://devblogs.microsoft.com/pfxteam/cooperatively-pausing-async-methods/					
-			Task<byte[]> readTask =  peer.ReceiveAsync();
+
+			Task<byte[]> readTask =  peer.ReceiveAsync(Marshal.SizeOf(typeof(MessageHeader)));
 
 			Task successTask = readTask.ContinueWith(ReadPacket, peer, TaskContinuationOptions.OnlyOnRanToCompletion);
-			successTask.ContinueWith(task => ReceiveFromPeer(peer));			
+			successTask.ContinueWith((task) =>  {
+				ReceiveFromPeer(peer);
+			});	
 
 			readTask.ContinueWith(ReadError, peer, TaskContinuationOptions.OnlyOnFaulted);
 		}
 
-		private void ReadPacket(Task<byte[]> readTask, object state) {
+		private async void ReadPacket(Task<byte[]> readTask, object state) {
 			Peer peer = (Peer) state;
-			foreach (byte b in readTask.Result) {
-				Console.WriteLine($"Read Packet {b}");
+			
+			MessageHeader header = MessageHeader.FromBytes(readTask.Result);
+			var msg = peer.ReceiveAsync(header.MsgLen).Result;
+
+			if (header.Type == MessageType.Response) {							
+					
+				var headerSize = Marshal.SizeOf(typeof(ResponseHeader));
+				var headerBytes = new byte[headerSize];
+				var response = new byte[msg.Length - headerSize];
+				Array.Copy(msg, headerBytes, headerSize);
+				Array.Copy(msg, headerSize, response, 0, msg.Length - headerSize);
+
+				ResponseHeader responseHeader = ResponseHeader.FromBytes(headerBytes);
+
+				TaskCompletionSource<byte[]> completionSource = null;
+				_PendingRequests.TryGetValue(responseHeader.RefId, out completionSource);
+
+				if (completionSource != null) {
+					completionSource.SetResult(response);
+				}
+
+				return;
 			}
+
+			// Check that message has not already been received
+			bool alreadyReceived = false;
+			if (!alreadyReceived) { 
+				
+				bool fwd = await Task.Run<bool>(() => {
+					
+					var receiveState = new ReceiveState(msg, peer, header.Id);
+					
+					if (header.Type == MessageType.Request) {
+						return _onReceiveRequest(receiveState);
+					} else if (header.Type == MessageType.Broadcast) {
+						return _onReceiveBroadcast(receiveState);
+					}
+
+					return false;
+
+				});
+
+				// Forward to other peers
+				if (fwd) {
+					Console.WriteLine("Forwarding...");
+					await SendAsync(header, msg);
+				}
+			}
+
 		}
 
-		private void ReadError(Task task, object state) {
-			Console.WriteLine($"Error Reading Packet {((Peer)state).LastException.GetType().Name}");
+		private void ReadError(Task failedTask, object peerState) {
+			Console.WriteLine($"Error Reading Packet {((Peer)peerState).LastException.GetType().Name}");
 		}
 
 	}
@@ -284,30 +431,32 @@ namespace Tasks {
 				} catch (Exception e) {
 					_hasErrored = true;
 					_lastException = e;
-					Console.WriteLine("Sending Exception");
+					Console.WriteLine("ErrorB");
 				}
 			});
 
 		}
 
-		public async Task<byte[]> ReceiveAsync() {
+		public async Task<byte[]> ReceiveAsync(int minBytes) {
 
 			byte[] content = null;			
 			await Task.Run(() => {
 
-				int bufferSize = 1024;
-				byte[] buffer = new byte[bufferSize];
+				byte[] buffer = new byte[minBytes];
 				try {
+					
+					int received = 0;
+					while (received != minBytes) {
+						received += Connection.Receive(buffer, received, minBytes - received, SocketFlags.None);
+					}
 
-					int received = Connection.Receive(buffer, 0, bufferSize, SocketFlags.None);
-					byte[] temp = new byte[received]; 
-					Array.Copy(buffer, 0, temp, 0, received);
 					_received += received;
-					content = temp;
+					content = buffer;
 
 				} catch (Exception e) {
 					_hasErrored = true;
 					_lastException = e;
+					Console.WriteLine("ErrorA");
 				}
 
 
