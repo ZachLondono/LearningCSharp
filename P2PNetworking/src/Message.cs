@@ -28,7 +28,6 @@ namespace P2PNetworking {
 	}
 
 	public struct MessageHeader {
-		
 		public byte ProtocolVersion;
 		public MessageType MessageType;
 		public int ContentLength;
@@ -36,37 +35,6 @@ namespace P2PNetworking {
 		public static int Size {
 			get => Marshal.SizeOf(typeof(MessageHeader));
 		}
-
-		/// Returns the bytes which represent the given header struct
-		public static byte[] GetBytes(MessageHeader header) {
-				
-			int size = Marshal.SizeOf(header);
-			byte[] encoded = new byte[size];
-
-			IntPtr ptr = Marshal.AllocHGlobal(size);
-			Marshal.StructureToPtr(header, ptr, true);
-			Marshal.Copy(ptr, encoded, 0, size);
-			Marshal.FreeHGlobal(ptr);
-
-
-			return encoded;
-
-		}
-
-		/// Constructs a message header from the given bytes
-		public static MessageHeader FromBytes(byte[] data) {
-
-			MessageHeader obj;
-			int size = Marshal.SizeOf(typeof(MessageHeader));
-			IntPtr ptr = Marshal.AllocHGlobal(size);
-			Marshal.Copy(data, 0, ptr, size);
-			obj = (MessageHeader) Marshal.PtrToStructure(ptr, typeof(MessageHeader));
-			Marshal.FreeHGlobal(ptr);
-
-			return obj;
-
-		}
-
 	}
 
 }
