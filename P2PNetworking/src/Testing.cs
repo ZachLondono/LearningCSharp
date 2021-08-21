@@ -57,7 +57,7 @@ namespace P2PTesting {
 
 		static async Task FileShareTest() {
 
-			IDBInterface dbConnection = new SQLiteDBConnection("./FileShareTest/");
+			IDBInterface dbConnection = await SQLiteDBConnection.CreateConnection("./FileShareTest/");
 			FileShareNode fsnA = new FileShareNode(11111, dbConnection);
 			FileShareNode fsnB = new FileShareNode(22222, dbConnection);
 
@@ -73,7 +73,7 @@ namespace P2PTesting {
 
 			using (SHA256 sha = SHA256.Create()) {
 				byte[] hash = sha.ComputeHash(data);
-				var result = dbConnection.ContainsKey(hash) ? '✓' : 'x';
+				var result = (await dbConnection.ContainsKey(hash)) ? '✓' : 'x';
 				Console.WriteLine($"Data Stored:	{result}");			
 				
 				byte[] received = await fsnA.GetFileOnNetwork(hash);
@@ -88,7 +88,7 @@ namespace P2PTesting {
 
 
 		static async Task TestSuite(string[] args) {
-			IDBInterface dbConnection = new SQLiteDBConnection("./DBTest/");
+			IDBInterface dbConnection = await SQLiteDBConnection.CreateConnection("./FileShareTest/");
 
 			byte[] testKey = Encoding.ASCII.GetBytes("Hello");
 			byte[] testValue = Encoding.ASCII.GetBytes("World");
@@ -103,47 +103,47 @@ namespace P2PTesting {
 			var result = ' ';
 
 			// Check if data contains key, before inserting it
-			result = dbConnection.ContainsKey(pair.Key) == false ? '✓' : 'x';
+			result = (await dbConnection.ContainsKey(pair.Key)) == false ? '✓' : 'x';
 			Console.WriteLine($"Check for pair before insert:\t{result}");
 
 			// Check if pair is inserted into data
-			result = dbConnection.InsertPair(pair) == true ? '✓' : 'x';
+			result = await dbConnection.InsertPair(pair) == true ? '✓' : 'x';
 			Console.WriteLine($"Insert new pair:\t{result}");
 
 			// Check if data contains key, after inserting it
-			result = dbConnection.ContainsKey(pair.Key) == true ? '✓' : 'x';
+			result = (await dbConnection.ContainsKey(pair.Key)) == true ? '✓' : 'x';
 			Console.WriteLine($"Check for pair after insert:\t{result}");
 
 			// Try to insert duplicate key
-			result = dbConnection.InsertPair(pair) == false ? '✓' : 'x';
+			result = await dbConnection.InsertPair(pair) == false ? '✓' : 'x';
 			Console.WriteLine($"Try insert duplicate key:\t{result}");
 
 			// Read value from known key
-			var a = dbConnection.SelectData("value", "key", pair.Key);
+			var a = await dbConnection.SelectData("value", "key", pair.Key);
 			result = IsEqualArr(a, pair.Value) ? '✓' : 'x';
 			Console.WriteLine($"Get value from key:\t{result}");
 
 			// Update value
-			result = dbConnection.UpdatePair(pair2) ? '✓' : 'x';
+			result = await dbConnection.UpdatePair(pair2) ? '✓' : 'x';
 			Console.WriteLine($"Update value:\t{result}");
 			
 			// Read updated value
-			var c = dbConnection.SelectData("value", "key", pair.Key);
+			var c = await dbConnection.SelectData("value", "key", pair.Key);
 			result = IsEqualArr(c, pair2.Value) ? '✓' : 'x';
 			Console.WriteLine($"Get updated value:\t{result}");
 
 			// Read key from known value
-			var b = dbConnection.SelectData("key", "value", pair2.Value);
+			var b = await dbConnection.SelectData("key", "value", pair2.Value);
 			if (b == null) result = 'x';
 			else result = IsEqualArr(b, pair2.Key) ? '✓' : 'x';
 			Console.WriteLine($"Get key from value:\t{result}");
 
 			// Delete key
-			result = dbConnection.RemoveKey(pair.Key) == true ? '✓' : 'x';
+			result = await dbConnection.RemoveKey(pair.Key) == true ? '✓' : 'x';
 			Console.WriteLine($"Remove key:\t{result}");
 
 			// Check if data contains key, after removing it
-			result = dbConnection.ContainsKey(pair.Key) == false ? '✓' : 'x';
+			result = (await dbConnection.ContainsKey(pair.Key)) == false ? '✓' : 'x';
 			Console.WriteLine($"Check for key after delete:\t{result}");
 			System.Console.WriteLine("=================================");
 
@@ -160,41 +160,41 @@ namespace P2PTesting {
 			System.Console.WriteLine("=================================");
 			System.Console.WriteLine("Testing peer table commands");
 			// Check if data contains key, before inserting it
-			result = dbConnection.ContainsPeer(peer) == false ? '✓' : 'x';
+			result = await dbConnection.ContainsPeer(peer) == false ? '✓' : 'x';
 			Console.WriteLine($"Check for non-existing peer:\t{result}");
 
 			// Check if pair is inserted into data
-			result = dbConnection.InsertPeer(peer) == true ? '✓' : 'x';
+			result = await dbConnection.InsertPeer(peer) == true ? '✓' : 'x';
 			Console.WriteLine($"Inserting new peer:\t{result}");
 
 			// Check if data contains key, after inserting it
-			result = dbConnection.ContainsPeer(peer) == true ? '✓' : 'x';
+			result = await dbConnection.ContainsPeer(peer) == true ? '✓' : 'x';
 			Console.WriteLine($"Check for new peer:\t{result}");
 
 			// Try to insert duplicate key
-			result = dbConnection.InsertPeer(peer) == false ? '✓' : 'x';
+			result = await dbConnection.InsertPeer(peer) == false ? '✓' : 'x';
 			Console.WriteLine($"Try to insert duplicate peer:\t{result}");
 
 			// Insert peer at same host, different port
-			result = dbConnection.InsertPeer(peer2) == true ? '✓' : 'x';
+			result = await dbConnection.InsertPeer(peer2) == true ? '✓' : 'x';
 			Console.WriteLine($"Insert new peer w/ same host:\t{result}");
 
 			// Insert peer at same host, different port
-			result = dbConnection.InsertPeer(peer3) == true ? '✓' : 'x';
+			result = await dbConnection.InsertPeer(peer3) == true ? '✓' : 'x';
 			Console.WriteLine($"Insert new peer w/ same port:\t{result}");
 
 			// Delete peer
-			result = dbConnection.RemovePeer(peer) == true ? '✓' : 'x';
+			result = await dbConnection.RemovePeer(peer) == true ? '✓' : 'x';
 			Console.WriteLine($"Remove peer1:\t{result}");
 
-			result = dbConnection.RemovePeer(peer2) == true ? '✓' : 'x';
+			result = await dbConnection.RemovePeer(peer2) == true ? '✓' : 'x';
 			Console.WriteLine($"Remove peer2:\t{result}");
 			
-			result = dbConnection.RemovePeer(peer3) == true ? '✓' : 'x';
+			result = await dbConnection.RemovePeer(peer3) == true ? '✓' : 'x';
 			Console.WriteLine($"Remove peer3:\t{result}");
 
 			// Check if data contains key, after removing it
-			result = dbConnection.ContainsPeer(peer) == false ? '✓' : 'x';
+			result = await dbConnection.ContainsPeer(peer) == false ? '✓' : 'x';
 			Console.WriteLine($"Check for peer1 after delete:\t{result}");
 
 			Console.WriteLine("Closing DB Connection");
@@ -214,7 +214,6 @@ namespace P2PTesting {
 		}
 
 		public static bool IsEqualArr(byte[] arr1, byte[] arr2) {
-
 			if (arr1.Length != arr2.Length) return false;
 
 			for (int i = 0; i < arr1.Length; i++) {
@@ -222,7 +221,6 @@ namespace P2PTesting {
 			}
 
 			return true;
-
 		}
 
 	}

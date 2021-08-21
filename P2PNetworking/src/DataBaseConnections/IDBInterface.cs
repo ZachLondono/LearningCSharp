@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Security.Cryptography;
+using System.Threading.Tasks;
 
 namespace P2PNetworking {
 
@@ -46,16 +47,16 @@ namespace P2PNetworking {
 
 		public void Close();
 
-		public bool ContainsKey(byte[] key);
-		public bool InsertPair(DataPair pair);
-		public bool UpdatePair(DataPair pair);
-		public byte[] SelectData(string dataCol, string conditionCol, byte[] conditionVal);
-		public bool RemoveKey(byte[] key);
+		public Task<bool> ContainsKey(byte[] key);
+		public Task<bool> InsertPair(DataPair pair);
+		public Task<bool> UpdatePair(DataPair pair);
+		public Task<byte[]> SelectData(string dataCol, string conditionCol, byte[] conditionVal);
+		public Task<bool> RemoveKey(byte[] key);
 
-		public List<PeerInfo> GetPeers(); 
-		public bool InsertPeer(PeerInfo newPeer); 
-		public bool RemovePeer(PeerInfo peer);
-		public bool ContainsPeer(PeerInfo peer);
+		public Task<List<PeerInfo>> GetPeers(); 
+		public Task<bool> InsertPeer(PeerInfo newPeer); 
+		public Task<bool> RemovePeer(PeerInfo peer);
+		public Task<bool> ContainsPeer(PeerInfo peer);
 		// public void BlackListPeer(Peer badPeer) { } 
 
 	}

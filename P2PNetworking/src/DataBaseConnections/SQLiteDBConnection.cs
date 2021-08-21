@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using System.Collections.Generic;
-using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace P2PNetworking {
 
@@ -8,27 +9,25 @@ namespace P2PNetworking {
 	
 		private SqliteConnection DBConnection { get; }
 
-		public SQLiteDBConnection(string storageDirectory) {
-
-			System.Console.WriteLine("Starting SQLite DB");
-
+		private SQLiteDBConnection(string storageDirectory) {
 			// Verify that storage directory is a valid directory
 			bool exists = System.IO.Directory.Exists(storageDirectory);
-	
 			if (!exists) throw new System.ArgumentException("Invalid storage directory, can't connect to database");
 	
 			DBConnection = new SqliteConnection($"Data Source={storageDirectory}/Peer2Peer.db");
-
 			DBConnection.Open();
-
-			System.Console.WriteLine("Creating peers Table");
-			CreateTableIfNotExist("peers", new string[]{"host VARCHAR(255)", "port INTEGER"});
-			System.Console.WriteLine("Creating data Table");
-			CreateTableIfNotExist("data", new string[]{"key BLOB", "value BLOB"});
 		}
 
-		public void CreateTableIfNotExist(string name, string[] columns) {
+		public static async Task<SQLiteDBConnection> CreateConnection(string storageDirectory) {
+			SQLiteDBConnection connection = new SQLiteDBConnection(storageDirectory);
 
+			await connection.CreateTableIfNotExist("peers", new string[]{"host VARCHAR(255)", "port INTEGER"});
+			await connection.CreateTableIfNotExist("data", new string[]{"key BLOB", "value BLOB"});
+
+			return connection;
+		}
+
+		public async Task CreateTableIfNotExist(string name, string[] columns) {
 			var queryString = $"CREATE TABLE IF NOT EXISTS {name} \n(\n";
 			for (int i = 0; i < columns.Length; i++) {
 				queryString += "\t" + columns[i];
@@ -39,23 +38,29 @@ namespace P2PNetworking {
 			var command = DBConnection.CreateCommand();
 			command.CommandText = queryString;
 
-			command.ExecuteNonQuery();
-
+			await Task.Run(() => command.ExecuteNonQuery());
 		}
 
-		public bool ContainsKey(byte[] key) {
+		public async Task<bool> ContainsKey(byte[] key) {
 		
 			var command = DBConnection.CreateCommand();
 			command.CommandText = "SELECT * FROM data WHERE key = $key";
 			command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
 			
-			var reader = command.ExecuteReader();
+			bool exists = false;
+			Task task = Task.Run(() => {
+				using (var reader = command.ExecuteReader()) {
+					exists = reader.HasRows; 
+				}
+			});
 
-			return reader.HasRows;
+			await task;
+
+			return exists;
 
 		}
 
-		public bool InsertPair(DataPair pair) {
+		public async Task<bool> InsertPair(DataPair pair) {
 
 			// Inserts the key value pair, there should only be one instance of key
 			// NOTE: this is likely susceptible to duplicate keys in the case of a race condition
@@ -69,12 +74,16 @@ namespace P2PNetworking {
 			command.Parameters.Add("$key", SqliteType.Blob, pair.Key.Length).Value = pair.Key;
 			command.Parameters.Add("$value", SqliteType.Blob, pair.Value.Length).Value = pair.Value;
 			
+			int rows = await Task<int>.Run(() => {
+				return command.ExecuteNonQuery();
+			});
+
 			// insertion was successful if 1 row was changed
-			return command.ExecuteNonQuery() == 1;
+			return rows == 1;
 
 		}
 
-		public bool UpdatePair(DataPair pair) {
+		public async Task<bool> UpdatePair(DataPair pair) {
 	
 			var command = DBConnection.CreateCommand();
 			command.CommandText = @"
@@ -85,55 +94,70 @@ namespace P2PNetworking {
 			command.Parameters.Add("$key", SqliteType.Blob, pair.Key.Length).Value = pair.Key;
 			command.Parameters.Add("$value", SqliteType.Blob, pair.Value.Length).Value = pair.Value;		
 
-			return command.ExecuteNonQuery() == 1;
+			int rows = await Task<int>.Run(() => {
+				return command.ExecuteNonQuery();
+			});
+
+			return rows == 1;
 
 		}
 
-		public bool RemoveKey(byte[] key) {
+		public async Task<bool> RemoveKey(byte[] key) {
 
 			var command = DBConnection.CreateCommand();
 			command.CommandText = "DELETE FROM data WHERE key = $key;";
 			command.Parameters.Add("$key", SqliteType.Blob, key.Length).Value = key;
 
-			int rows = command.ExecuteNonQuery();
+			int rows = await Task<int>.Run(() => {
+				return command.ExecuteNonQuery();
+			});
+
 			return 1 == rows;
 		}
 
-		public byte[] SelectData(string dataCol, string conditionCol, byte[] conditionVal) {
+		public async Task<byte[]> SelectData(string dataCol, string conditionCol, byte[] conditionVal) {
 
 			var command = DBConnection.CreateCommand();
 			command.CommandText = $"SELECT {dataCol} FROM data WHERE {conditionCol} = $conditionalVal;";
 			command.Parameters.Add("$conditionalVal", SqliteType.Blob, conditionVal.Length).Value = conditionVal;
 
-			using (var reader = command.ExecuteReader()) {
-				if (!reader.HasRows) return null;
-				reader.Read();
-				return (byte[])reader.GetValue(0);
-			}
+			byte[] data = null;
+
+			await Task.Run(() => {
+				using (var reader = command.ExecuteReader()) {
+					if (!reader.HasRows) return;
+					reader.Read();
+					data = (byte[])reader.GetValue(0);
+				}
+			});
+
+			return data;
 		
 		}	
 
-		public List<PeerInfo> GetPeers() {
+		public async Task<List<PeerInfo>> GetPeers() {
 			
 			List<PeerInfo> peers = new List<PeerInfo>(); 
 
 			var command = DBConnection.CreateCommand();
 			command.CommandText = "SELECT host, port FROM peers;";
 
-			using (var reader = command.ExecuteReader()) {
-				while (reader.Read()) {
-					var host = reader.GetString(0);
-					var port = reader.GetInt32(1);
-					PeerInfo peer = new PeerInfo(host, port);
-					peers.Add(peer);
+			await Task.Run(() => {
+				using (var reader = command.ExecuteReader()) {
+					while (reader.Read()) {
+						var host = reader.GetString(0);
+						var port = reader.GetInt32(1);
+						PeerInfo peer = new PeerInfo(host, port);
+						peers.Add(peer);
+					}
 				}
-			}
+			});
 
 			return peers;
 
 		}
 
-		public bool InsertPeer(PeerInfo newPeer) {
+		public async Task<bool> InsertPeer(PeerInfo newPeer) {
 
 			var command = DBConnection.CreateCommand();
 			command.CommandText = @"
@@ -144,31 +168,42 @@ namespace P2PNetworking {
 			command.Parameters.AddWithValue("$host", newPeer.Host);
 			command.Parameters.AddWithValue("$port", newPeer.Port);
 
-			int rows = command.ExecuteNonQuery();
+			int rows = await Task<int>.Run(() => {
+				return command.ExecuteNonQuery();
+			});
+			
 			return 1 == rows;
 		}
 
-		public bool RemovePeer(PeerInfo peer) {
+		public async Task<bool> RemovePeer(PeerInfo peer) {
 
 			var command = DBConnection.CreateCommand();
 			command.CommandText = "DELETE FROM peers WHERE host = $host AND port = $port;";
 			command.Parameters.AddWithValue("$host", peer.Host);
 			command.Parameters.AddWithValue("$port", peer.Port);
 
-			return 1 == command.ExecuteNonQuery();
-
+			int rows = await Task<int>.Run(() => {
+				return command.ExecuteNonQuery();
+			});
+			
+			return 1 == rows;
 		}
 
-		public bool ContainsPeer(PeerInfo peer) {
+		public async Task<bool> ContainsPeer(PeerInfo peer) {
 			
 			var command = DBConnection.CreateCommand();
 			command.CommandText = "SELECT * FROM peers WHERE host = $host AND port = $port";
 			command.Parameters.AddWithValue("$host", peer.Host);
 			command.Parameters.AddWithValue("$port", peer.Port);
-			
-			var reader = command.ExecuteReader();
+	
+			bool exists = false;
+			await Task<int>.Run(() => {
+				using(var reader = command.ExecuteReader()) {
+					exists = reader.HasRows;
+				}
+			});
 
-			return reader.HasRows;
+			return exists;
 
 		}
 

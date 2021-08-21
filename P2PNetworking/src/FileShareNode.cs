@@ -24,7 +24,7 @@ namespace P2PNetworking {
 
 			if (request.header.MessageType == MessageType.REQUEST_RESOURCE) {
 
-				byte[] data = _dbInterface.SelectData("value", "key", request.msg);
+				byte[] data = _dbInterface.SelectData("value", "key", request.msg).Result;
 
 				if (data == null) {
 					byte[] response = MessageToBytes(MessageType.RESOURCE_NOT_FOUND, new byte[]{});
