@@ -26,8 +26,8 @@ namespace P2PNetworking {
 
 				MessageHeader messageHeader = new MessageHeader(new Random().Next(), MessageType.Response, Marshal.SizeOf(responseHeader) + response.Length);
 				
-				await peer.SendAsync(MessageHeader.GetBytes(messageHeader));
-				await peer.SendAsync(ResponseHeader.GetBytes(responseHeader));
+				await peer.SendAsync(GetBytes<MessageHeader>(messageHeader));
+				await peer.SendAsync(GetBytes<ResponseHeader>(responseHeader));
 				await peer.SendAsync(response);
 			}
 
@@ -48,60 +48,14 @@ namespace P2PNetworking {
 				Type = type;
 				MsgLen = len;
 			}
-
-			public static byte[] GetBytes(MessageHeader header) {
-				int size = Marshal.SizeOf(header);
-				byte[] arr = new byte[size];
-
-				IntPtr ptr = Marshal.AllocHGlobal(size);
-				Marshal.StructureToPtr(header, ptr, true);
-				Marshal.Copy(ptr, arr, 0, size);
-				Marshal.FreeHGlobal(ptr);
-				return arr;
-			}
-
-			public static MessageHeader FromBytes(byte[] bytes) {
-				MessageHeader header = new MessageHeader();
-				int size = Marshal.SizeOf(header);
-				IntPtr ptr = Marshal.AllocHGlobal(size);
-				Marshal.Copy(bytes, 0, ptr, size);
-				header = (MessageHeader) Marshal.PtrToStructure(ptr, header.GetType());
-				Marshal.FreeHGlobal(ptr);
-
-				return header;
-			}
-
 		}
 
 		public struct ResponseHeader {
 			public int RefId { get; }
 			public int Length { get; }
-
 			public ResponseHeader(int refId, int length) {
 				RefId = refId;
 				Length = length;
-			}
-
-			public static byte[] GetBytes(ResponseHeader header) {
-				int size = Marshal.SizeOf(header);
-				byte[] arr = new byte[size];
-
-				IntPtr ptr = Marshal.AllocHGlobal(size);
-				Marshal.StructureToPtr(header, ptr, true);
-				Marshal.Copy(ptr, arr, 0, size);
-				Marshal.FreeHGlobal(ptr);
-				return arr;
-			}
-
-			public static ResponseHeader FromBytes(byte[] bytes) {
-				ResponseHeader header = new ResponseHeader();
-				int size = Marshal.SizeOf(header);
-				IntPtr ptr = Marshal.AllocHGlobal(size);
-				Marshal.Copy(bytes, 0, ptr, size);
-				header = (ResponseHeader) Marshal.PtrToStructure(ptr, header.GetType());
-				Marshal.FreeHGlobal(ptr);
-
-				return header;
 			}
 		}
 	
@@ -163,7 +117,7 @@ namespace P2PNetworking {
 		private async Task SendAsync(MessageHeader header, byte[] msg) {
 			List<Task> sendingTasks = new List<Task>();
 
-			var headerBytes = MessageHeader.GetBytes(header);
+			var headerBytes = GetBytes<MessageHeader>(header);
 			
 			_ConnectedPeers.ForEach((Peer peer) => {
 				// Send header and then msg content			
@@ -188,7 +142,7 @@ namespace P2PNetworking {
 			CancellationToken token = source.Token;
 
 			MessageHeader header = new MessageHeader(new Random().Next(), MessageType.Request, msg.Length);
-			var headerBytes = MessageHeader.GetBytes(header);
+			var headerBytes = GetBytes<MessageHeader>(header);
 
 			TaskCompletionSource<byte[]> requestCompleteSource = new TaskCompletionSource<byte[]>();
 			_PendingRequests.Add(header.Id, requestCompleteSource);
@@ -223,7 +177,9 @@ namespace P2PNetworking {
 		private async void ReadPacket(Task<byte[]> readTask, object state) {
 			Peer peer = (Peer) state;
 			
-			MessageHeader header = MessageHeader.FromBytes(readTask.Result);
+			MessageHeader header;
+			FromBytes<MessageHeader>(readTask.Result, out header);
+
 			var msg = peer.ReceiveAsync(header.MsgLen).Result;
 
 			if (header.Type == MessageType.Response) {							
@@ -234,7 +190,8 @@ namespace P2PNetworking {
 				Array.Copy(msg, headerBytes, headerSize);
 				Array.Copy(msg, headerSize, response, 0, msg.Length - headerSize);
 
-				ResponseHeader responseHeader = ResponseHeader.FromBytes(headerBytes);
+				ResponseHeader responseHeader;
+				FromBytes<ResponseHeader>(headerBytes, out responseHeader);
 
 				TaskCompletionSource<byte[]> completionSource = null;
 				_PendingRequests.TryGetValue(responseHeader.RefId, out completionSource);
@@ -275,6 +232,25 @@ namespace P2PNetworking {
 
 		private void ReadError(Task failedTask, object peerState) {
 			Console.WriteLine($"Error Reading Packet {((Peer)peerState).LastException.GetType().Name}");
+		}
+
+		public static byte[] GetBytes<T>(T str) {
+			int size = Marshal.SizeOf(str);
+			byte[] arr = new byte[size];
+
+			IntPtr ptr = Marshal.AllocHGlobal(size);
+			Marshal.StructureToPtr(str, ptr, true);
+			Marshal.Copy(ptr, arr, 0, size);
+			Marshal.FreeHGlobal(ptr);
+			return arr;
+		}
+
+		public static void FromBytes<T>(byte[] bytes, out T output) {
+			int size = Marshal.SizeOf(typeof(T));
+			IntPtr ptr = Marshal.AllocHGlobal(size);
+			Marshal.Copy(bytes, 0, ptr, size);
+			output = (T) Marshal.PtrToStructure(ptr, typeof(T));
+			Marshal.FreeHGlobal(ptr);
 		}
 
 	}
