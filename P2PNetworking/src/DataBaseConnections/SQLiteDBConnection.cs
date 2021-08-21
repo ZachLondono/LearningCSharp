@@ -59,7 +59,6 @@ namespace P2PNetworking {
 
 			// Inserts the key value pair, there should only be one instance of key
 			// NOTE: this is likely susceptible to duplicate keys in the case of a race condition
-
 			var command = DBConnection.CreateCommand();
 			command.CommandText = @"
 						INSERT INTO data(key, value)
@@ -71,9 +70,22 @@ namespace P2PNetworking {
 			command.Parameters.Add("$value", SqliteType.Blob, pair.Value.Length).Value = pair.Value;
 			
 			// insertion was successful if 1 row was changed
-			int rows = command.ExecuteNonQuery();
+			return command.ExecuteNonQuery() == 1;
 
-			return rows == 1;
+		}
+
+		public bool UpdatePair(DataPair pair) {
+	
+			var command = DBConnection.CreateCommand();
+			command.CommandText = @"
+						UPDATE data
+						SET value = $value
+						WHERE key = $key;
+						";
+			command.Parameters.Add("$key", SqliteType.Blob, pair.Key.Length).Value = pair.Key;
+			command.Parameters.Add("$value", SqliteType.Blob, pair.Value.Length).Value = pair.Value;		
+
+			return command.ExecuteNonQuery() == 1;
 
 		}
 
@@ -101,9 +113,9 @@ namespace P2PNetworking {
 		
 		}	
 
-		public List<Peer> GetPeers() {
+		public List<PeerInfo> GetPeers() {
 			
-			List<Peer> peers = new List<Peer>(); 
+			List<PeerInfo> peers = new List<PeerInfo>(); 
 
 			var command = DBConnection.CreateCommand();
 			command.CommandText = "SELECT host, port FROM peers;";
@@ -112,7 +124,7 @@ namespace P2PNetworking {
 				while (reader.Read()) {
 					var host = reader.GetString(0);
 					var port = reader.GetInt32(1);
-					Peer peer = new Peer(host, port);
+					PeerInfo peer = new PeerInfo(host, port);
 					peers.Add(peer);
 				}
 			}
@@ -121,7 +133,7 @@ namespace P2PNetworking {
 
 		}
 
-		public bool InsertPeer(Peer newPeer) {
+		public bool InsertPeer(PeerInfo newPeer) {
 
 			var command = DBConnection.CreateCommand();
 			command.CommandText = @"
@@ -136,7 +148,7 @@ namespace P2PNetworking {
 			return 1 == rows;
 		}
 
-		public bool RemovePeer(Peer peer) {
+		public bool RemovePeer(PeerInfo peer) {
 
 			var command = DBConnection.CreateCommand();
 			command.CommandText = "DELETE FROM peers WHERE host = $host AND port = $port;";
@@ -147,7 +159,7 @@ namespace P2PNetworking {
 
 		}
 
-		public bool ContainsPeer(Peer peer) {
+		public bool ContainsPeer(PeerInfo peer) {
 			
 			var command = DBConnection.CreateCommand();
 			command.CommandText = "SELECT * FROM peers WHERE host = $host AND port = $port";
