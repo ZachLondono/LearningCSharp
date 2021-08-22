@@ -10,8 +10,9 @@ namespace P2PNetworking {
  
 	class Node {
 	
-		public struct ReceiveState {
+		public class ReceiveState {
 			public byte[] Content { get; } 
+			public Guid SenderId { get => peer.Id; }
 			private Peer peer;
 			private int requestId;
 			public ReceiveState(byte[] received, Peer receivedFrom, int requestId) {
@@ -21,9 +22,7 @@ namespace P2PNetworking {
 			}
 			
 			public async Task Respond (byte[] response) {
-
 				ResponseHeader responseHeader = new ResponseHeader(requestId, response.Length);
-
 				MessageHeader messageHeader = new MessageHeader(new Random().Next(), MessageType.Response, Marshal.SizeOf(responseHeader) + response.Length);
 				
 				await peer.SendAsync(GetBytes<MessageHeader>(messageHeader));
@@ -64,10 +63,10 @@ namespace P2PNetworking {
 		protected List<Peer> _ConnectedPeers = new List<Peer>();
 		private List<Task> _ReceivingTasks = new List<Task>();
 		private Dictionary<int, TaskCompletionSource<byte[]>> _PendingRequests = new Dictionary<int, TaskCompletionSource<byte[]>>();
-		private Predicate<ReceiveState> _onReceiveRequest;
-		private Predicate<ReceiveState> _onReceiveBroadcast;
+		private Func<ReceiveState,Task<bool>> _onReceiveRequest;
+		private Func<ReceiveState,Task<bool>> _onReceiveBroadcast;
 
-		public Node(int port, Predicate<ReceiveState> onReceiveRequest, Predicate<ReceiveState> onReceiveBroadcast) {
+		public Node(int port, Func<ReceiveState,Task<bool>> onReceiveRequest, Func<ReceiveState,Task<bool>> onReceiveBroadcast) {
 			Port = port;
 			_onReceiveRequest = onReceiveRequest;
 			_onReceiveBroadcast = onReceiveBroadcast;
@@ -101,7 +100,12 @@ namespace P2PNetworking {
 		}
 
 		public async Task<Peer> ConnectAsync(IPEndPoint remoteEP) {
-			Peer peer = new Peer();
+
+			var ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());
+			var ipAddress = ipHostInfo.AddressList[0];
+			Socket peerSocket = new Socket(ipAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp);			
+
+			Peer peer = new Peer(peerSocket);
 			await peer.ConnectAsync(remoteEP);
 
 			if (peer.HasErrored) {
@@ -136,28 +140,55 @@ namespace P2PNetworking {
 			await SendAsync(header, msg);
 		}
 
-		public async Task<byte[]> RequestAsync(byte[] msg) {
-			// Sends a request and returns a response
-			CancellationTokenSource source = new CancellationTokenSource();
-			CancellationToken token = source.Token;
-
+		public async Task<byte[]> RequestAsync(byte[] msg, int timeout) {
+			
 			MessageHeader header = new MessageHeader(new Random().Next(), MessageType.Request, msg.Length);
 			var headerBytes = GetBytes<MessageHeader>(header);
-
+			
 			TaskCompletionSource<byte[]> requestCompleteSource = new TaskCompletionSource<byte[]>();
 			_PendingRequests.Add(header.Id, requestCompleteSource);
 
-			_ConnectedPeers.ForEach ((peer) => {
-				// TODO: this task should time out
-				Task requestTask = peer.SendAsync(headerBytes);
-				requestTask.ContinueWith(task => peer.SendAsync(msg),
-							TaskContinuationOptions.OnlyOnRanToCompletion);
-			});
+			byte[] response = null; 
+
+			foreach (Peer peer in _ConnectedPeers) {
+				Task headerTask = peer.SendAsync(headerBytes);
+				Task requestTask = headerTask.ContinueWith(task => peer.SendAsync(msg), TaskContinuationOptions.OnlyOnRanToCompletion);
+
+				if (await Task.WhenAny(requestCompleteSource.Task, Task.Delay(timeout)) == requestCompleteSource.Task) {						
+					_PendingRequests.Remove(header.Id);
+					response = requestCompleteSource.Task.Result;
+				} // else try the next peer
+			}
+
+			if (response == null) {
+				_PendingRequests.Remove(header.Id);
+				throw new TimeoutException("No response received");
+			}
+
+			return response;
+		}
+
+		public async Task<byte[]> RequestFromPeer(Guid peer_id, byte[] msg, int timeout) {
+			// Should probably switch to a hash map rather than list
+			Peer peer = _ConnectedPeers.Find((peer) => peer.Id.Equals(peer_id));
+			if (peer == null) throw new ArgumentException("No such peer");
+
+			MessageHeader header = new MessageHeader(new Random().Next(), MessageType.Request, msg.Length);
+			var headerBytes = GetBytes<MessageHeader>(header);
 			
-			byte[] response =  await requestCompleteSource.Task;
+			TaskCompletionSource<byte[]> requestCompleteSource = new TaskCompletionSource<byte[]>();
+			_PendingRequests.Add(header.Id, requestCompleteSource);
 
-			return response;	
+			byte[] response = null; 
+			Task headerTask = peer.SendAsync(headerBytes);
+			Task requestTask = headerTask.ContinueWith(task => peer.SendAsync(msg), TaskContinuationOptions.OnlyOnRanToCompletion);
+			
+			if (await Task.WhenAny(requestCompleteSource.Task, Task.Delay(timeout)) == requestCompleteSource.Task) {						
+				_PendingRequests.Remove(header.Id);
+				response = requestCompleteSource.Task.Result;
+			} else throw new TimeoutException("No response received");
 
+			return response;
 		}
 
 		private void ReceiveFromPeer(Peer peer) {
@@ -207,19 +238,15 @@ namespace P2PNetworking {
 			bool alreadyReceived = false;
 			if (!alreadyReceived) { 
 				
-				bool fwd = await Task.Run<bool>(() => {
+				bool fwd = false;
 					
-					var receiveState = new ReceiveState(msg, peer, header.Id);
-					
-					if (header.Type == MessageType.Request) {
-						return _onReceiveRequest(receiveState);
-					} else if (header.Type == MessageType.Broadcast) {
-						return _onReceiveBroadcast(receiveState);
-					}
-
-					return false;
-
-				});
+				var receiveState = new ReceiveState(msg, peer, header.Id);
+				
+				if (header.Type == MessageType.Request) {
+					fwd = await _onReceiveRequest(receiveState);
+				} else if (header.Type == MessageType.Broadcast) {
+					fwd = await _onReceiveBroadcast(receiveState);
+				}
 
 				// Forward to other peers
 				if (fwd) {
