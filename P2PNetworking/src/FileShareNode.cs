@@ -1,20 +1,63 @@
 using System;
 using System.Net;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Security.Cryptography;
 using System.Collections.Generic;
 
 namespace P2PNetworking {
 
+	public struct Chunk {
+		public byte[] Data;
+		public byte[] Hash;
+		public int Index;
+	}
+
+	public class File {
+		private Dictionary<int,Chunk> Chunks { get; } 
+		private File(Dictionary<int, Chunk> chunks) {
+			Chunks = chunks;
+		}
+
+		public ICollection<Chunk> GetChunks() {
+			return Chunks.Values;
+		}
+
+		public static File MakeFileFromData(byte[] data, HashAlgorithm algorithm) {
+			Dictionary<int, Chunk> chunks = new Dictionary<int, Chunk>();		
+			byte[][] dataSections = FileShareNode.GetChunks(data);
+			var range = Enumerable.Range(0, dataSections.Length);	
+
+			// TODO this should be paralelized
+			for (int i = 0; i < dataSections.Length; i++) {
+				Chunk chunk = new Chunk();
+				chunk.Data = dataSections[i];
+				chunk.Hash = algorithm.ComputeHash(dataSections[i]);
+				chunk.Index = i;
+				chunks.Add(i, chunk);
+			}
+
+			File file = new File(chunks);
+
+			return file;
+		}
+
+	}
+
 	public class FileShareNode : IDisposable {
 		public const int PROTOCOL_VERSION = 1;
+		public const int CHUNK_SIZE = 2;
+	
 		private Node node;
 		private IDBInterface _dbInterface;
 		private Dictionary<byte[], List<Guid>> _knownFileLocations;
-		public FileShareNode(int port, IDBInterface dbInterface) {
+		private HashAlgorithm _digest;
+
+		public FileShareNode(int port, HashAlgorithm algorithm, IDBInterface dbInterface) {
 			node = new Node(port, onReceiveRequest, onReceiveBroadcast);
 			_dbInterface = dbInterface;
 			_knownFileLocations = new Dictionary<byte[], List<Guid>>();
+			_digest = algorithm;
 
 			var listenTask = node.ListenAsync();
 		}
@@ -49,18 +92,16 @@ namespace P2PNetworking {
 			switch (broadcast.header.MessageType) {
 
 				case MessageType.CREATE_RESOURCE:
-					using (SHA256 sha = SHA256.Create()) {
-						byte[] hash = sha.ComputeHash(broadcast.msg);
-						DataPair data = new DataPair(hash, broadcast.msg);
+					byte[] hash = _digest.ComputeHash(broadcast.msg);
+					DataPair data = new DataPair(hash, broadcast.msg);
 
-						bool inserted = await _dbInterface.InsertPair(data);
+					bool inserted = await _dbInterface.InsertPair(data);
 
-						if (inserted) {
-							byte[] suc = MessageToBytes(MessageType.RESOURCE_CREATED, hash);
-							await node.BroadcastAsync(suc);
-						}
-
+					if (inserted) {
+						byte[] suc = MessageToBytes(MessageType.RESOURCE_CREATED, hash);
+						await node.BroadcastAsync(suc);
 					}
+
 					break;
 
 				case MessageType.RESOURCE_CREATED:
@@ -85,7 +126,7 @@ namespace P2PNetworking {
 			await node.ConnectAsync(remoteEP);
 		}
 
-		public async Task<byte[]> GetFileOnNetwork(byte[] key) {
+		public async Task<byte[]> GetChunkOnNetwork(byte[] key) {
 			byte[] request = MessageToBytes(MessageType.REQUEST_RESOURCE, key);
 
 			// Check if we know a specific peer has it
@@ -100,12 +141,11 @@ namespace P2PNetworking {
 						continue;
 					}
 				}
-
 			}
 
 			// If we do not, or they no longer have it, ask all the peers we do know (this will reask the same peers from above, should probably do something about that... maybe)
 			try {
-				byte[] responseData = await node.RequestAsync(request, 3000);
+				byte[] responseData = await node.RequestAsync(request, 1000);
 				(MessageHeader header, byte[] responseData) response = GetMessage(responseData);
 				return response.responseData;
 			} catch (TimeoutException) {
@@ -113,9 +153,42 @@ namespace P2PNetworking {
 			}
 		}
 
-		public async Task StoreFileOnNetwork(byte[] data) {
-			byte[] creationMsg = MessageToBytes(MessageType.CREATE_RESOURCE, data);		
-			await node.BroadcastAsync(creationMsg);
+		public async Task StoreFileOnNetwork(File file) {
+			List<Task> broadcastTasks = new List<Task>();
+			foreach (Chunk chunk in file.GetChunks()) {					
+				byte[] creationMsg = MessageToBytes(MessageType.CREATE_RESOURCE, chunk.Data);
+				broadcastTasks.Add(node.BroadcastAsync(creationMsg));
+			}
+
+			await Task.WhenAll(broadcastTasks);
+		}
+		
+		
+		public async Task StoreDataLocally(File file) {
+			List<Task> insertTasks = new List<Task>();
+			foreach (Chunk chunk in file.GetChunks()) {	
+				insertTasks.Add(_dbInterface.InsertPair(new DataPair(chunk.Hash, chunk.Data)));
+			}
+
+			await Task.WhenAll(insertTasks);
+		}
+
+		public static byte[][] GetChunks(byte[] data) {
+			
+			int chunkCount = data.Length / CHUNK_SIZE  + 1;
+			byte[][] chunks = new byte[chunkCount][];
+		
+			for (int i = 0; i < chunkCount; i++) {
+				int startIdx = i * CHUNK_SIZE;
+				int endIdx = (i+1)*CHUNK_SIZE;
+				endIdx = endIdx > data.Length ? data.Length : endIdx ;
+
+				chunks[i] = new byte[endIdx - startIdx];
+
+				Array.Copy(data, startIdx, chunks[i], 0, endIdx - startIdx);
+			}
+			
+			return chunks;
 		}
 
 		public static byte[] MessageToBytes(MessageType type, byte[] content) {
