@@ -10,8 +10,9 @@ namespace P2PNetworking {
  
 	class Node {
 	
-		public struct ReceiveState {
+		public class ReceiveState {
 			public byte[] Content { get; } 
+			public Guid SenderId { get => peer.Id; }
 			private Peer peer;
 			private int requestId;
 			public ReceiveState(byte[] received, Peer receivedFrom, int requestId) {
@@ -21,9 +22,7 @@ namespace P2PNetworking {
 			}
 			
 			public async Task Respond (byte[] response) {
-
 				ResponseHeader responseHeader = new ResponseHeader(requestId, response.Length);
-
 				MessageHeader messageHeader = new MessageHeader(new Random().Next(), MessageType.Response, Marshal.SizeOf(responseHeader) + response.Length);
 				
 				await peer.SendAsync(GetBytes<MessageHeader>(messageHeader));
@@ -101,7 +100,12 @@ namespace P2PNetworking {
 		}
 
 		public async Task<Peer> ConnectAsync(IPEndPoint remoteEP) {
-			Peer peer = new Peer();
+
+			var ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());
+			var ipAddress = ipHostInfo.AddressList[0];
+			Socket peerSocket = new Socket(ipAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp);			
+
+			Peer peer = new Peer(peerSocket);
 			await peer.ConnectAsync(remoteEP);
 
 			if (peer.HasErrored) {
@@ -136,27 +140,32 @@ namespace P2PNetworking {
 			await SendAsync(header, msg);
 		}
 
-		public async Task<byte[]> RequestAsync(byte[] msg) {
-			// Sends a request and returns a response
-			CancellationTokenSource source = new CancellationTokenSource();
-			CancellationToken token = source.Token;
-
+		public async Task<byte[]> RequestAsync(byte[] msg, int timeout) {
+			
 			MessageHeader header = new MessageHeader(new Random().Next(), MessageType.Request, msg.Length);
 			var headerBytes = GetBytes<MessageHeader>(header);
-
+			
 			TaskCompletionSource<byte[]> requestCompleteSource = new TaskCompletionSource<byte[]>();
 			_PendingRequests.Add(header.Id, requestCompleteSource);
 
-			_ConnectedPeers.ForEach ((peer) => {
-				// TODO: this task should time out
-				Task requestTask = peer.SendAsync(headerBytes);
-				requestTask.ContinueWith(task => peer.SendAsync(msg),
-							TaskContinuationOptions.OnlyOnRanToCompletion);
-			});
-			
-			byte[] response =  await requestCompleteSource.Task;
+			byte[] response = null; 
 
-			return response;	
+			foreach (Peer peer in _ConnectedPeers) {
+				Task headerTask = peer.SendAsync(headerBytes);
+				Task requestTask = headerTask.ContinueWith(task => peer.SendAsync(msg), TaskContinuationOptions.OnlyOnRanToCompletion);
+
+				if (await Task.WhenAny(requestCompleteSource.Task, Task.Delay(timeout)) == requestCompleteSource.Task) {						
+					_PendingRequests.Remove(header.Id);
+					response = requestCompleteSource.Task.Result;
+				} // else try the next peer
+			}
+
+			if (response == null) {
+				_PendingRequests.Remove(header.Id);
+				throw new TimeoutException("No response received");
+			}
+
+			return response;
 
 		}
 

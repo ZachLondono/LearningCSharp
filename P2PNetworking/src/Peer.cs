@@ -3,7 +3,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading.Tasks;
 
-
 namespace P2PNetworking {
 	class Peer {
 		
@@ -18,41 +17,17 @@ namespace P2PNetworking {
 		public int BytesReceived { get => _received; }
 		public bool HasErrored { get => _hasErrored; }
 		public Exception LastException { get => _lastException; }
-		
-		private class ReceiveState {
-			public const int BufferSize = 1024;
-			public byte[] Buffer = new byte[BufferSize];		
-			public Action<byte[]> OnReceive;
-		}
+		public Guid Id { get; }	
 
 		public Peer(Socket connection) {
 			Connection = connection;
-			var ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());
-			var ipAddress = ipHostInfo.AddressList[0];
+
+			Id = new Guid();
 			_isConnected = false;
 			_sent = 0;	
 			_received = 0;
 		}
-
-		public Peer() {
-			var ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());
-			var ipAddress = ipHostInfo.AddressList[0];
-			_isConnected = false;
-			_sent = 0;	
-			_received = 0;
-			
-			Connection = new Socket(ipAddress.AddressFamily,
-						SocketType.Stream,
-						ProtocolType.Tcp);
-		}
-		
-		public Peer(IPEndPoint remoteEP) : this() {
-
-			Connection.BeginConnect(remoteEP, 
-					(obj) => { _isConnected = true; }, Connection);		
-
-		}
-
+	
 		public async Task ConnectAsync(IPEndPoint remoteEP) {
 			
 			if (_isConnected) return;
@@ -77,7 +52,6 @@ namespace P2PNetworking {
 				} catch (Exception e) {
 					_hasErrored = true;
 					_lastException = e;
-					Console.WriteLine("ErrorB");
 				}
 			});
 
@@ -102,54 +76,11 @@ namespace P2PNetworking {
 				} catch (Exception e) {
 					_hasErrored = true;
 					_lastException = e;
-					Console.WriteLine("ErrorA");
 				}
-
 
 			});
 
 			return content;
-
-		}
-
-		public void BeginSend(byte[] msg) {
-			if (!_isConnected) return;
-			Connection.BeginSend(msg, 0, msg.Length, SocketFlags.None,
-				new AsyncCallback(SendCallback), Connection);
-		}
-
-		private void SendCallback(IAsyncResult ar) {
-			try {
-				_sent += Connection.EndSend(ar);
-			} catch (Exception e) {
-				_hasErrored = true;
-				_lastException = e;
-			}
-		}
-
-		public void BeginReceive(Action<byte[]> onReceive) {
-			if (!_isConnected) return;
-
-			var state = new ReceiveState();
-			state.OnReceive = onReceive;
-
-			Connection.BeginReceive(state.Buffer, 0, ReceiveState.BufferSize, 0, 
-					new AsyncCallback(ReadCallback), state);
-
-		}
-
-		private void ReadCallback(IAsyncResult ar) {
-			
-			ReceiveState state = (ReceiveState) ar.AsyncState;
-			
-			int bytesRead = Connection.EndReceive(ar);
-			
-			_received += bytesRead;
-
-			byte[] content = new byte[bytesRead];
-			Array.Copy(state.Buffer, 0, content, 0, bytesRead);
-
-			state.OnReceive(content);
 
 		}
 

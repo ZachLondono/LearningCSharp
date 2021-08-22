@@ -14,6 +14,10 @@ namespace P2PTesting {
 		}
 
 		static async Task NodeTest1() {
+			
+			TaskCompletionSource<byte[]> requestSource = new TaskCompletionSource<byte[]>();
+			TaskCompletionSource<byte[]> broadcastASource = new TaskCompletionSource<byte[]>();
+			TaskCompletionSource<byte[]> broadcastBSource = new TaskCompletionSource<byte[]>();
 
 			var request = new byte[1]{222};
 			var response = new byte[1]{111};
@@ -21,13 +25,11 @@ namespace P2PTesting {
 
 			Node nodeB = new Node(11000, 
 					async (state) => {
-						var result = IsEqualArr(request, state.Content) ? '✓' : 'x';
-						Console.WriteLine($"Request Received:	{result}");
+						requestSource.SetResult(state.Content);
 						await state.Respond(response);
 						return false;
 					},async (state) => {
-						var result = IsEqualArr(broadcast, state.Content) ? '✓' : 'x';
-						Console.WriteLine($"Request Received:	{result}");
+						broadcastBSource.SetResult(state.Content);
 						return await Task<bool>.Run(()=>false);
 					});
 
@@ -35,7 +37,8 @@ namespace P2PTesting {
 					async (state) => {
 						return await Task<bool>.Run(()=>false);
 					},async (state) => {
-						return await Task<bool>.Run(()=>false);
+						broadcastASource.SetResult(state.Content);
+						return await Task<bool>.Run(() => false);
 					});
 
 
@@ -47,11 +50,44 @@ namespace P2PTesting {
 
 			await nodeA.ConnectAsync(remoteEP);
 
-			byte[] responseReceived = await nodeA.RequestAsync(request);
-			await nodeA.BroadcastAsync(broadcast);
+			try {
+				byte[] responseReceived = await nodeA.RequestAsync(request, 3000);
+				var result = IsEqualArr(response, responseReceived) ? '✓' : 'x';
+				Console.WriteLine($"ResponseA Received:	{result}");
+			} catch (TimeoutException) {
+				Console.WriteLine("RequestA Received:	timedout");
+			}
+			
+			try {
+				byte[] responseReceived = await nodeB.RequestAsync(request, 3000);
+				Console.WriteLine($"ResponseB Received:	'x'");
+			} catch (TimeoutException) {
+				Console.WriteLine("RequestB Received:	✓");
+			}
 
-			var result = IsEqualArr(response, responseReceived) ? '✓' : 'x';
-			Console.WriteLine($"Response Received:	{result}");
+			if (await Task.WhenAny(requestSource.Task, Task.Delay(1000)) == requestSource.Task) {
+				var result = IsEqualArr(request, requestSource.Task.Result) ? '✓' : 'x';
+				Console.WriteLine($"Request Received:	{result}");
+			} else {
+				Console.WriteLine($"Request Received:	timeout");
+			}
+			
+			await nodeA.BroadcastAsync(broadcast);
+			await nodeB.BroadcastAsync(broadcast);
+		
+			if (await Task.WhenAny(broadcastASource.Task, Task.Delay(1000)) == broadcastASource.Task) {
+				var result = IsEqualArr(broadcast, broadcastASource.Task.Result) ? '✓' : 'x';
+				Console.WriteLine($"BroadcastA Received:	{result}");
+			} else {
+				Console.WriteLine($"BroadcastA Received:	timeout");
+			}
+
+			if (await Task.WhenAny(broadcastBSource.Task, Task.Delay(1000)) == broadcastBSource.Task) {
+				var result = IsEqualArr(broadcast, broadcastBSource.Task.Result) ? '✓' : 'x';
+				Console.WriteLine($"BroadcastB Received:	{result}");
+			} else {
+				Console.WriteLine($"BroadcastB Received:	timeout");
+			}
 
 		}
 

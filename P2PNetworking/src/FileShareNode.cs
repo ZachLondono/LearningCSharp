@@ -68,10 +68,14 @@ namespace P2PNetworking {
 
 		public async Task<byte[]> GetFileOnNetwork(byte[] key) {
 			byte[] request = MessageToBytes(MessageType.REQUEST_RESOURCE, key);
-			byte[] responseData = await node.RequestAsync(request);
 
-			(MessageHeader header, byte[] responseData) response = GetMessage(responseData);
-			return response.responseData;
+			try {
+				byte[] responseData = await node.RequestAsync(request, 3000);
+				(MessageHeader header, byte[] responseData) response = GetMessage(responseData);
+				return response.responseData;
+			} catch (TimeoutException) {
+				return null;
+			}
 		}
 
 		public async Task StoreFileOnNetwork(byte[] data) {
