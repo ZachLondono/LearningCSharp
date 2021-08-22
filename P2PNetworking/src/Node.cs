@@ -166,7 +166,29 @@ namespace P2PNetworking {
 			}
 
 			return response;
+		}
 
+		public async Task<byte[]> RequestFromPeer(Guid peer_id, byte[] msg, int timeout) {
+			// Should probably switch to a hash map rather than list
+			Peer peer = _ConnectedPeers.Find((peer) => peer.Id.Equals(peer_id));
+			if (peer == null) throw new ArgumentException("No such peer");
+
+			MessageHeader header = new MessageHeader(new Random().Next(), MessageType.Request, msg.Length);
+			var headerBytes = GetBytes<MessageHeader>(header);
+			
+			TaskCompletionSource<byte[]> requestCompleteSource = new TaskCompletionSource<byte[]>();
+			_PendingRequests.Add(header.Id, requestCompleteSource);
+
+			byte[] response = null; 
+			Task headerTask = peer.SendAsync(headerBytes);
+			Task requestTask = headerTask.ContinueWith(task => peer.SendAsync(msg), TaskContinuationOptions.OnlyOnRanToCompletion);
+			
+			if (await Task.WhenAny(requestCompleteSource.Task, Task.Delay(timeout)) == requestCompleteSource.Task) {						
+				_PendingRequests.Remove(header.Id);
+				response = requestCompleteSource.Task.Result;
+			} else throw new TimeoutException("No response received");
+
+			return response;
 		}
 
 		private void ReceiveFromPeer(Peer peer) {
