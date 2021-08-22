@@ -124,10 +124,12 @@ namespace P2PNetworking {
 			var headerBytes = GetBytes<MessageHeader>(header);
 			
 			_ConnectedPeers.ForEach((Peer peer) => {
-				// Send header and then msg content			
-				Task sendingTask = peer.SendAsync(headerBytes);
-				sendingTask.ContinueWith(task => peer.SendAsync(msg),
-							TaskContinuationOptions.OnlyOnRanToCompletion);
+				// Send header and then msg content
+				byte[] fullMsg = new byte[headerBytes.Length + msg.Length];
+				Array.Copy(headerBytes, fullMsg, headerBytes.Length);
+				Array.Copy(msg, 0, fullMsg, headerBytes.Length, msg.Length);
+
+				Task sendingTask = peer.SendAsync(fullMsg);
 				
 				sendingTasks.Add(sendingTask);
 			});
