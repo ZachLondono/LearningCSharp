@@ -93,30 +93,75 @@ namespace P2PTesting {
 
 		static async Task FileShareTest() {
 
+			TaskCompletionSource<bool> createBroadcastReceived = new TaskCompletionSource<bool>();
+			TaskCompletionSource<bool> storedBroadcastReceived = new TaskCompletionSource<bool>();
+			
+			byte[] data = Encoding.ASCII.GetBytes("Hello World");
+			SHA256 sha = SHA256.Create();
+			byte[] hash = sha.ComputeHash(data);
+			
 			IDBInterface dbConnection = await SQLiteDBConnection.CreateConnection("./FileShareTest/");
 			FileShareNode fsnA = new FileShareNode(11111, dbConnection);
 			FileShareNode fsnB = new FileShareNode(22222, dbConnection);
+			Node node = new Node(10101, 
+				async (state) => {
+					return await Task<bool>.Run(()=>false);
+				}, async (state) => {
+					byte[] broadcastData = state.Content;
+					(MessageHeader header, byte[] msg) broadcast = FileShareNode.GetMessage(broadcastData);
+					
+					if (broadcast.header.MessageType == MessageType.RESOURCE_CREATED) {												
+						if (IsEqualArr(broadcast.msg, hash)) 
+							createBroadcastReceived.SetResult(true);
+						else createBroadcastReceived.SetResult(false);
+					} else if (broadcast.header.MessageType == MessageType.CREATE_RESOURCE) {							
+						if (IsEqualArr(broadcast.msg, data)) 
+							storedBroadcastReceived.SetResult(true);
+						else storedBroadcastReceived.SetResult(false);
+					}
+					
+					return await Task<bool>.Run(()=>false);
+				});
 
 			IPHostEntry ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());	
 			IPAddress ipAddress = ipHostInfo.AddressList[0];
-			IPEndPoint remoteEP = new IPEndPoint(ipAddress, 11111);
+			IPEndPoint remoteEPA = new IPEndPoint(ipAddress, 11111);
+			IPEndPoint remoteEPB = new IPEndPoint(ipAddress, 22222);
+			
+			await fsnB.ConnectAsync(remoteEPA);
+			await node.ConnectAsync(remoteEPA);
+			await node.ConnectAsync(remoteEPB);
+			
+			// This is just a request to store the file, when it returns it does not mean that the file was definetly stored
+			await fsnB.StoreFileOnNetwork(data);
 
-			await fsnB.ConnectAsync(remoteEP);
+			var result = '.';
 
-			byte[] data = Encoding.ASCII.GetBytes("Hello World");
-
-			await fsnA.StoreFileOnNetwork(data);
-
-			using (SHA256 sha = SHA256.Create()) {
-				byte[] hash = sha.ComputeHash(data);
-				var result = (await dbConnection.ContainsKey(hash)) ? '✓' : 'x';
-				Console.WriteLine($"Data Stored:	{result}");			
-				
-				byte[] received = await fsnA.GetFileOnNetwork(hash);
-				result = IsEqualArr(received, data) ? '✓' : 'x';
-				Console.WriteLine($"Data Received:	{result}");			
+			if (await Task.WhenAny(storedBroadcastReceived.Task, Task.Delay(1000)) == storedBroadcastReceived.Task) {
+				result = storedBroadcastReceived.Task.Result ? '✓' : 'x';
+				Console.WriteLine($"Create Request Received:	{result}");
+			} else {
+				Console.WriteLine($"Create Request Received:	timeout");
 			}
+			
+			// Wait to make sure other nodes have time to store the file
+			await Task.Delay(500);
+			result = (await dbConnection.ContainsKey(hash)) ? '✓' : 'x';
+			Console.WriteLine($"Data Stored:	{result}");			
 
+			if (await Task.WhenAny(createBroadcastReceived.Task, Task.Delay(1000)) == createBroadcastReceived.Task) {
+				result = createBroadcastReceived.Task.Result ? '✓' : 'x';
+				Console.WriteLine($"Created Broadcast Received:	{result}");
+			} else {
+				Console.WriteLine($"Created Broadcast Received:	timeout");
+			}
+			
+			byte[] received = await fsnB.GetFileOnNetwork(hash);
+			if (received != null) result = IsEqualArr(received, data) ? '✓' : 'x';
+			else result = 'x';
+			Console.WriteLine($"Data Received:	{result}");			
+
+			await dbConnection.RemoveKey(hash);
 			fsnA.Dispose();
 			fsnB.Dispose();
 

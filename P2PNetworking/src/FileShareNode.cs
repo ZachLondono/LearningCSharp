@@ -52,12 +52,14 @@ namespace P2PNetworking {
 					using (SHA256 sha = SHA256.Create()) {
 						byte[] hash = sha.ComputeHash(broadcast.msg);
 						DataPair data = new DataPair(hash, broadcast.msg);
+
 						bool inserted = await _dbInterface.InsertPair(data);
 
 						if (inserted) {
 							byte[] suc = MessageToBytes(MessageType.RESOURCE_CREATED, hash);
 							await node.BroadcastAsync(suc);
 						}
+
 					}
 					break;
 
@@ -116,7 +118,7 @@ namespace P2PNetworking {
 			await node.BroadcastAsync(creationMsg);
 		}
 
-		private byte[] MessageToBytes(MessageType type, byte[] content) {
+		public static byte[] MessageToBytes(MessageType type, byte[] content) {
 			MessageHeader header = new MessageHeader();
 			header.MessageType = type;
 			header.ProtocolVersion = FileShareNode.PROTOCOL_VERSION;
@@ -132,7 +134,7 @@ namespace P2PNetworking {
 			return fullMessage;
 		}
 
-		private (MessageHeader header, byte[] msg) GetMessage(byte[] data) {
+		public static (MessageHeader header, byte[] msg) GetMessage(byte[] data) {
 			MessageHeader header;
 			byte[] headerBytes = new byte[MessageHeader.Size];
 			byte[] msg = new byte[data.Length - headerBytes.Length];
