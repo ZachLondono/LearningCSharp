@@ -1,5 +1,6 @@
 using System;
 using P2PNetworking;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Net;
 using System.Text;
@@ -11,6 +12,29 @@ namespace P2PTesting {
 
 		static async Task Main(string[] args) {
 			await TestSuite(args);
+		}
+
+		static async  Task FileShareTest2() {
+			
+			IDBInterface dbConnection = await SQLiteDBConnection.CreateConnection("./FileShareTest/");
+			SHA256 algorithm = SHA256.Create();
+			
+			FileShareNode fsnA = new FileShareNode(11111, algorithm, dbConnection);
+			FileShareNode fsnB = new FileShareNode(22222, algorithm, dbConnection);
+
+			IPHostEntry ipHostInfo = Dns.GetHostEntry(Dns.GetHostName());	
+			IPAddress ipAddress = ipHostInfo.AddressList[0];
+			IPEndPoint remoteEP = new IPEndPoint(ipAddress, 22222);
+
+			await fsnA.ConnectAsync(remoteEP);
+
+			byte[] data = Encoding.ASCII.GetBytes("Hello World");
+			File file = File.MakeFileFromData(data, algorithm);
+
+			await fsnA.StoreFileOnNetwork(file);
+
+			await Task.Delay(2000);
+
 		}
 
 		static async Task NodeTest1() {
@@ -27,7 +51,6 @@ namespace P2PTesting {
 					async (state) => {
 						requestSource.SetResult(state.Content);
 						await state.Respond(response);
-						return false;
 					},async (state) => {
 						broadcastBSource.SetResult(state.Content);
 						return await Task<bool>.Run(()=>false);
@@ -35,7 +58,7 @@ namespace P2PTesting {
 
 			Node nodeA = new Node(10101, 
 					async (state) => {
-						return await Task<bool>.Run(()=>false);
+						await Task.Run(()=>{});
 					},async (state) => {
 						broadcastASource.SetResult(state.Content);
 						return await Task<bool>.Run(() => false);
@@ -92,32 +115,35 @@ namespace P2PTesting {
 		}
 
 		static async Task FileShareTest() {
+			
+			IDBInterface dbConnection = await SQLiteDBConnection.CreateConnection("./FileShareTest/");
+			SHA256 algorithm = SHA256.Create();
+			
+			byte[] data = Encoding.ASCII.GetBytes("Hello World");
+			File file = File.MakeFileFromData(data, algorithm);
 
+			int resourcesCreated = 0;
+			int resourcesRequested = 0;
 			TaskCompletionSource<bool> createBroadcastReceived = new TaskCompletionSource<bool>();
 			TaskCompletionSource<bool> storedBroadcastReceived = new TaskCompletionSource<bool>();
 			
-			byte[] data = Encoding.ASCII.GetBytes("Hello World");
-			SHA256 sha = SHA256.Create();
-			byte[] hash = sha.ComputeHash(data);
-			
-			IDBInterface dbConnection = await SQLiteDBConnection.CreateConnection("./FileShareTest/");
-			FileShareNode fsnA = new FileShareNode(11111, dbConnection);
-			FileShareNode fsnB = new FileShareNode(22222, dbConnection);
+			FileShareNode fsnA = new FileShareNode(11111, algorithm, dbConnection);
+			FileShareNode fsnB = new FileShareNode(22222, algorithm, dbConnection);
 			Node node = new Node(10101, 
 				async (state) => {
-					return await Task<bool>.Run(()=>false);
+					await Task.Run(()=>{});
 				}, async (state) => {
 					byte[] broadcastData = state.Content;
 					(MessageHeader header, byte[] msg) broadcast = FileShareNode.GetMessage(broadcastData);
 					
 					if (broadcast.header.MessageType == MessageType.RESOURCE_CREATED) {												
-						if (IsEqualArr(broadcast.msg, hash)) 
+						resourcesCreated++;
+						if (resourcesCreated == file.GetChunks().Count) 
 							createBroadcastReceived.SetResult(true);
-						else createBroadcastReceived.SetResult(false);
 					} else if (broadcast.header.MessageType == MessageType.CREATE_RESOURCE) {							
-						if (IsEqualArr(broadcast.msg, data)) 
+						resourcesRequested++;
+						if (resourcesRequested == file.GetChunks().Count) 
 							storedBroadcastReceived.SetResult(true);
-						else storedBroadcastReceived.SetResult(false);
 					}
 					
 					return await Task<bool>.Run(()=>false);
@@ -133,7 +159,7 @@ namespace P2PTesting {
 			await node.ConnectAsync(remoteEPB);
 			
 			// This is just a request to store the file, when it returns it does not mean that the file was definetly stored
-			await fsnB.StoreFileOnNetwork(data);
+			await fsnB.StoreFileOnNetwork(file);
 
 			var result = '.';
 
@@ -146,8 +172,10 @@ namespace P2PTesting {
 			
 			// Wait to make sure other nodes have time to store the file
 			await Task.Delay(500);
-			result = (await dbConnection.ContainsKey(hash)) ? '✓' : 'x';
-			Console.WriteLine($"Data Stored:	{result}");			
+			foreach (Chunk chunk in file.GetChunks()) {
+				result = (await dbConnection.ContainsKey(chunk.Hash)) ? '✓' : 'x';
+				Console.WriteLine($"Data Stored:	{result}");			
+			}
 
 			if (await Task.WhenAny(createBroadcastReceived.Task, Task.Delay(1000)) == createBroadcastReceived.Task) {
 				result = createBroadcastReceived.Task.Result ? '✓' : 'x';
@@ -156,12 +184,15 @@ namespace P2PTesting {
 				Console.WriteLine($"Created Broadcast Received:	timeout");
 			}
 			
-			byte[] received = await fsnB.GetFileOnNetwork(hash);
-			if (received != null) result = IsEqualArr(received, data) ? '✓' : 'x';
-			else result = 'x';
-			Console.WriteLine($"Data Received:	{result}");			
+			foreach (Chunk chunk in file.GetChunks()) {
+				byte[] hash = chunk.Hash;
+				byte[] received = await fsnB.GetChunkOnNetwork(hash);
+				if (received != null) result = IsEqualArr(received, chunk.Data) ? '✓' : 'x';
+				else result = 'x';
+				Console.WriteLine($"Data Received:	{result}");			
+				await dbConnection.RemoveKey(hash);
+			}
 
-			await dbConnection.RemoveKey(hash);
 			fsnA.Dispose();
 			fsnB.Dispose();
 
