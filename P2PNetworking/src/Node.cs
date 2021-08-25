@@ -14,8 +14,8 @@ namespace P2PNetworking {
 			public byte[] Content { get; } 
 			public Guid SenderId { get => peer.Id; }
 			private Peer peer;
-			private int requestId;
-			public ReceiveState(byte[] received, Peer receivedFrom, int requestId) {
+			private Guid requestId;
+			public ReceiveState(byte[] received, Peer receivedFrom, Guid requestId) {
 				Content = received;
 				peer = receivedFrom;
 				this.requestId = requestId;
@@ -23,7 +23,7 @@ namespace P2PNetworking {
 			
 			public async Task Respond (byte[] response) {
 				ResponseHeader responseHeader = new ResponseHeader(requestId, response.Length);
-				MessageHeader messageHeader = new MessageHeader(new Random().Next(), MessageType.Response, Marshal.SizeOf(responseHeader) + response.Length);
+				MessageHeader messageHeader = new MessageHeader(MessageType.Response, Marshal.SizeOf(responseHeader) + response.Length);
 				
 				await peer.SendAsync(GetBytes<MessageHeader>(messageHeader));
 				await peer.SendAsync(GetBytes<ResponseHeader>(responseHeader));
@@ -39,20 +39,21 @@ namespace P2PNetworking {
 		}
 		
 		public struct MessageHeader {
-			public int Id { get; }
+			public Guid Id { get; }
 			public MessageType Type { get; }
 			public int MsgLen { get; }
-			public MessageHeader(int id, MessageType type, int len) {
-				Id = id;
+			
+			public MessageHeader(MessageType type, int len) {
 				Type = type;
 				MsgLen = len;
+				Id = Guid.NewGuid();
 			}
 		}
 
 		public struct ResponseHeader {
-			public int RefId { get; }
+			public Guid RefId { get; }
 			public int Length { get; }
-			public ResponseHeader(int refId, int length) {
+			public ResponseHeader(Guid refId, int length) {
 				RefId = refId;
 				Length = length;
 			}
@@ -62,14 +63,16 @@ namespace P2PNetworking {
 		private Socket Listener;
 		protected List<Peer> _ConnectedPeers = new List<Peer>();
 		private List<Task> _ReceivingTasks = new List<Task>();
-		private Dictionary<int, TaskCompletionSource<byte[]>> _PendingRequests = new Dictionary<int, TaskCompletionSource<byte[]>>();
-		private Func<ReceiveState,Task<bool>> _onReceiveRequest;
+		private Dictionary<Guid, TaskCompletionSource<byte[]>> _PendingRequests = new Dictionary<Guid, TaskCompletionSource<byte[]>>();
+		private HashSet<Guid> _processedMessages;
+		private Func<ReceiveState,Task> _onReceiveRequest;
 		private Func<ReceiveState,Task<bool>> _onReceiveBroadcast;
 
-		public Node(int port, Func<ReceiveState,Task<bool>> onReceiveRequest, Func<ReceiveState,Task<bool>> onReceiveBroadcast) {
+		public Node(int port, Func<ReceiveState, Task> onReceiveRequest, Func<ReceiveState,Task<bool>> onReceiveBroadcast) {
 			Port = port;
 			_onReceiveRequest = onReceiveRequest;
 			_onReceiveBroadcast = onReceiveBroadcast;
+			_processedMessages = new HashSet<Guid>();
 		}
 		
 		public async Task ListenAsync() {
@@ -138,13 +141,14 @@ namespace P2PNetworking {
 		}
 	
 		public async Task BroadcastAsync(byte[] msg) {
-			MessageHeader header = new MessageHeader(new Random().Next(), MessageType.Broadcast, msg.Length);
+			MessageHeader header = new MessageHeader(MessageType.Broadcast, msg.Length);
+			_processedMessages.Add(header.Id);
 			await SendAsync(header, msg);
 		}
 
 		public async Task<byte[]> RequestAsync(byte[] msg, int timeout) {
 			
-			MessageHeader header = new MessageHeader(new Random().Next(), MessageType.Request, msg.Length);
+			MessageHeader header = new MessageHeader(MessageType.Request, msg.Length);
 			var headerBytes = GetBytes<MessageHeader>(header);
 			
 			TaskCompletionSource<byte[]> requestCompleteSource = new TaskCompletionSource<byte[]>();
@@ -157,12 +161,12 @@ namespace P2PNetworking {
 				Task requestTask = headerTask.ContinueWith(task => peer.SendAsync(msg), TaskContinuationOptions.OnlyOnRanToCompletion);
 
 				if (await Task.WhenAny(requestCompleteSource.Task, Task.Delay(timeout)) == requestCompleteSource.Task) {						
-					_PendingRequests.Remove(header.Id);
 					response = requestCompleteSource.Task.Result;
 				} // else try the next peer
 			}
 
 			if (response == null) {
+				// All nodes timed out, remove the message from pending requests
 				_PendingRequests.Remove(header.Id);
 				throw new TimeoutException("No response received");
 			}
@@ -175,7 +179,7 @@ namespace P2PNetworking {
 			Peer peer = _ConnectedPeers.Find((peer) => peer.Id.Equals(peer_id));
 			if (peer == null) throw new ArgumentException("No such peer");
 
-			MessageHeader header = new MessageHeader(new Random().Next(), MessageType.Request, msg.Length);
+			MessageHeader header = new MessageHeader(MessageType.Request, msg.Length);
 			var headerBytes = GetBytes<MessageHeader>(header);
 			
 			TaskCompletionSource<byte[]> requestCompleteSource = new TaskCompletionSource<byte[]>();
@@ -186,7 +190,6 @@ namespace P2PNetworking {
 			Task requestTask = headerTask.ContinueWith(task => peer.SendAsync(msg), TaskContinuationOptions.OnlyOnRanToCompletion);
 			
 			if (await Task.WhenAny(requestCompleteSource.Task, Task.Delay(timeout)) == requestCompleteSource.Task) {						
-				_PendingRequests.Remove(header.Id);
 				response = requestCompleteSource.Task.Result;
 			} else throw new TimeoutException("No response received");
 
@@ -215,8 +218,15 @@ namespace P2PNetworking {
 
 			var msg = peer.ReceiveAsync(header.MsgLen).Result;
 
-			if (header.Type == MessageType.Response) {							
+			// If this message has already been seen, it can be ignored
+			// The node still needs to read the message's content otherwise those bytes will be misinterpreted as a header
+			if (_processedMessages.Contains(header.Id)) return;
+			// If the message has not been seen, add it to the list of seen messages 
+			else _processedMessages.Add(header.Id);
+
+			if (header.Type == MessageType.Response) {	
 					
+				// If the message is a response type, the following bytes are a response header and then the response
 				var headerSize = Marshal.SizeOf(typeof(ResponseHeader));
 				var headerBytes = new byte[headerSize];
 				var response = new byte[msg.Length - headerSize];
@@ -226,31 +236,28 @@ namespace P2PNetworking {
 				ResponseHeader responseHeader;
 				FromBytes<ResponseHeader>(headerBytes, out responseHeader);
 
+				// Check if the response is referencing a previous request which is pending
 				TaskCompletionSource<byte[]> completionSource = null;
 				_PendingRequests.TryGetValue(responseHeader.RefId, out completionSource);
 
 				if (completionSource != null) {
+					// If there is a pending request, set its value to the bytes received
+					_PendingRequests.Remove(responseHeader.RefId);
 					completionSource.SetResult(response);
 				}
 
 				return;
 			}
 
-			// Check that message has not already been received
-			bool alreadyReceived = false;
-			if (!alreadyReceived) { 
-				
-				bool fwd = false;
-					
-				var receiveState = new ReceiveState(msg, peer, header.Id);
-				
-				if (header.Type == MessageType.Request) {
-					fwd = await _onReceiveRequest(receiveState);
-				} else if (header.Type == MessageType.Broadcast) {
-					fwd = await _onReceiveBroadcast(receiveState);
-				}
+			var receiveState = new ReceiveState(msg, peer, header.Id);
 
-				// Forward to other peers
+			if (header.Type == MessageType.Request) {
+				// TODO: create a proxy request to allow a node to request data from another node which it is not directly connected
+				await _onReceiveRequest(receiveState);
+			} else if (header.Type == MessageType.Broadcast) {
+				bool fwd = await _onReceiveBroadcast(receiveState);
+				// Only broadcasts should ever be forwarded 
+				// A response will be ignored by any node which did not request it and a request which goes through a proxy node will not have a way to return the response
 				if (fwd) {
 					Console.WriteLine("Forwarding...");
 					await SendAsync(header, msg);

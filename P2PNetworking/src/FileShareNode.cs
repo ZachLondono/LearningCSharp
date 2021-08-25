@@ -56,14 +56,13 @@ namespace P2PNetworking {
 		public FileShareNode(int port, HashAlgorithm algorithm, IDBInterface dbInterface) {
 			node = new Node(port, onReceiveRequest, onReceiveBroadcast);
 			_dbInterface = dbInterface;
-			_knownFileLocations = new Dictionary<byte[], List<Guid>>();
 			_digest = algorithm;
+			_knownFileLocations = new Dictionary<byte[], List<Guid>>();
 
 			var listenTask = node.ListenAsync();
 		}
 
-		private async Task<bool> onReceiveRequest(Node.ReceiveState state) {
-
+		private async Task onReceiveRequest(Node.ReceiveState state) {
 			byte[] requestData = state.Content;
 			(MessageHeader header, byte[] msg) request = GetMessage(requestData);
 
@@ -72,6 +71,11 @@ namespace P2PNetworking {
 				byte[] data = _dbInterface.SelectData("value", "key", request.msg).Result;
 
 				if (data == null) {
+					// TODO: ask any of this node's peers if they have the file
+					// This node can then take 1 of 2 actions
+					// 1. Download the file from that peer, and then send that file to the requesting node 
+					// 2. Let the requesting node know that this node is connected to another node which has the file
+					// 		the requesting node can then send a proxy request through this node or connect directly to that node
 					byte[] response = MessageToBytes(MessageType.RESOURCE_NOT_FOUND, new byte[]{});
 					await state.Respond(response);
 				} else {
@@ -81,7 +85,6 @@ namespace P2PNetworking {
 
 			}
 
-			return false;
 		}
 
 		private async Task<bool> onReceiveBroadcast(Node.ReceiveState state) {
