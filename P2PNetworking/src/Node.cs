@@ -24,10 +24,16 @@ namespace P2PNetworking {
 			public async Task Respond (byte[] response) {
 				ResponseHeader responseHeader = new ResponseHeader(requestId, response.Length);
 				MessageHeader messageHeader = new MessageHeader(MessageType.Response, Marshal.SizeOf(responseHeader) + response.Length);
-				
-				await peer.SendAsync(GetBytes<MessageHeader>(messageHeader));
-				await peer.SendAsync(GetBytes<ResponseHeader>(responseHeader));
-				await peer.SendAsync(response);
+
+				var headerBytes = GetBytes<MessageHeader>(messageHeader);
+				var responseHeaderBytes = GetBytes<ResponseHeader>(responseHeader);
+
+				byte[] fullMsg = new byte[headerBytes.Length + responseHeaderBytes.Length + response.Length];
+				Array.Copy(headerBytes, fullMsg, headerBytes.Length);
+				Array.Copy(responseHeaderBytes, 0, fullMsg, headerBytes.Length, responseHeaderBytes.Length);
+				Array.Copy(response, 0, fullMsg, headerBytes.Length + responseHeaderBytes.Length, response.Length);
+		
+				await peer.SendAsync(fullMsg);
 			}
 
 		}
@@ -157,8 +163,12 @@ namespace P2PNetworking {
 			byte[] response = null; 
 
 			foreach (Peer peer in _ConnectedPeers) {
-				Task headerTask = peer.SendAsync(headerBytes);
-				Task requestTask = headerTask.ContinueWith(task => peer.SendAsync(msg), TaskContinuationOptions.OnlyOnRanToCompletion);
+
+				byte[] fullMsg = new byte[headerBytes.Length + msg.Length];
+				Array.Copy(headerBytes, fullMsg, headerBytes.Length);
+				Array.Copy(msg, 0, fullMsg, headerBytes.Length, msg.Length);
+				
+				await peer.SendAsync(fullMsg);
 
 				if (await Task.WhenAny(requestCompleteSource.Task, Task.Delay(timeout)) == requestCompleteSource.Task) {						
 					response = requestCompleteSource.Task.Result;
@@ -185,10 +195,13 @@ namespace P2PNetworking {
 			TaskCompletionSource<byte[]> requestCompleteSource = new TaskCompletionSource<byte[]>();
 			_PendingRequests.Add(header.Id, requestCompleteSource);
 
-			byte[] response = null; 
-			Task headerTask = peer.SendAsync(headerBytes);
-			Task requestTask = headerTask.ContinueWith(task => peer.SendAsync(msg), TaskContinuationOptions.OnlyOnRanToCompletion);
+			byte[] fullMsg = new byte[headerBytes.Length + msg.Length];
+			Array.Copy(headerBytes, fullMsg, headerBytes.Length);
+			Array.Copy(msg, 0, fullMsg, headerBytes.Length, msg.Length);
+
+			await peer.SendAsync(fullMsg);
 			
+			byte[] response = null; 
 			if (await Task.WhenAny(requestCompleteSource.Task, Task.Delay(timeout)) == requestCompleteSource.Task) {						
 				response = requestCompleteSource.Task.Result;
 			} else throw new TimeoutException("No response received");
