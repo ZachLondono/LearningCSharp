@@ -16,6 +16,12 @@ namespace P2PNetworking {
 	
 			DBConnection = new SqliteConnection($"Data Source={storageDirectory}/Peer2Peer.db");
 			DBConnection.Open();
+
+			var optimize = DBConnection.CreateCommand();
+			optimize.CommandText = @"PRAGMA analysis_limit=400;
+									PRAGMA optimize;";
+			optimize.ExecuteNonQuery();
+
 		}
 
 		public static async Task<SQLiteDBConnection> CreateConnection(string storageDirectory) {
